@@ -1,5 +1,7 @@
 import asyncio
+import logging
 import os
+import warnings
 from asyncio.futures import _chain_future as chain_future
 
 from studip_fuse.async_fetch import AsyncState, main
@@ -9,9 +11,9 @@ from studip_fuse.virtual_path import VirtualPath
 
 def async_fetch():
     loop = asyncio.get_event_loop()
-    # loop.set_debug(True)
-    # logging.basicConfig(level=logging.DEBUG)
-    # warnings.resetwarnings()
+    loop.set_debug(True)
+    logging.basicConfig(level=logging.DEBUG)
+    warnings.resetwarnings()
 
     state = AsyncState()
     chain_future(loop.create_task(main(state)), state.root)

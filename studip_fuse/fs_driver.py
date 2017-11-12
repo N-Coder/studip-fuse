@@ -7,7 +7,6 @@ from typing import List, Tuple
 import attr
 from fuse import Operations
 
-from studip_api.util import mkdict
 from studip_fuse.virtual_path import VirtualPath, iterate_vps_hierarchically
 
 log = logging.getLogger("studip_fs.fs_drive")
@@ -63,7 +62,9 @@ class FUSEView(Operations):
 
     def getattr(self, path, fh=None):
         level, sub_path, is_folder, sub_vps = self._resolve(path)
-        st = mkdict(*(sub_vp.getattr() for sub_vp in sub_vps))
+        st = {}
+        for sub_vp in sub_vps:
+            st.update(sub_vp.getattr())
         return {key: val for key, val in st.items() if key in
                 ('st_atime', 'st_ctime', 'st_gid', 'st_mode', 'st_mtime', 'st_nlink', 'st_size', 'st_uid')}
 

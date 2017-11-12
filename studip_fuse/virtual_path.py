@@ -12,7 +12,7 @@ from cached_property import cached_property
 from more_itertools import one, unique_everseen
 
 from studip_api.model import Course, File, Folder, Semester
-from studip_api.util import Charset, EscapeMode, escape_file_name, lexicalise_semester, mkdict
+from studip_fuse.path_util import Charset, EscapeMode, escape_file_name, normalize_path
 
 log = logging.getLogger("studip_fs.virtual_path")
 iter_log = log.getChild("hierarchical_iterator")
@@ -45,12 +45,12 @@ class VirtualPath(object):
 
     @cached_property
     def partial_path(self):
-        partial = "/".join(self.path_segments).format(**self._known_tokens)
-        partial = path.normpath(partial)
-        while partial.startswith("/"):
-            partial = partial[1:]
-        while partial.endswith("/"):
-            partial = partial[:-1]
+        path_segments = self.path_segments
+        if self._loop_over_path and self._file:
+            # preview the file path we're generating in the loop
+            path_segments = path_segments + [self.next_path_segments[0]]
+        partial = "/".join(path_segments).format(**self._known_tokens)
+        partial = normalize_path(partial)
         return partial
 
     @cached_property
@@ -71,54 +71,41 @@ class VirtualPath(object):
 
         elif Course in self._content_options:
             if self._course:  # everything is already known, no options on this level
-                return [VirtualPath(**self._sub_args)]
-            options = [f for f in itertools.chain(*self.state.courses.result())
-                       if (not self._semester or f.semester == self._semester)]
-            return [VirtualPath(**mkdict(self._sub_args, known_data=mkdict(self.known_data.items(), (Course, o))))
-                    for o in options]
+                return [self._sub_path()]
+            return [self._sub_path(new_known_data={Course: c})
+                    for c in itertools.chain(*self.state.courses.result())
+                    if (not self._semester or c.semester == self._semester)]
 
         elif Semester in self._content_options:
             if self._semester:  # everything is already known, no options on this level
-                return [VirtualPath(**self._sub_args)]
-            options = self.state.semesters.result()
-            return [VirtualPath(**mkdict(self._sub_args, known_data=mkdict(self.known_data.items(), (Semester, o))))
-                    for o in options]
+                return [self._sub_path()]
+            return [self._sub_path(new_known_data={Semester: s})
+                    for s in self.state.semesters.result()]
 
         else:
             assert "{" not in self.next_path_segments[0]  # static name
-            return [VirtualPath(**self._sub_args)]
+            return [self._sub_path()]
 
     def _list_contents_file_options(self):
         assert self.is_folder
-
-        def subfiles_to_virtual_paths(files):
-            contents = []
-            for f in files:
-                if self._loop_over_path and f.is_folder():
-                    # leave possibility for taking path "loop over contents of one folder #1" below again
-                    contents.append(VirtualPath(**mkdict(
-                        self._sub_args, known_data=mkdict(self.known_data.items(), (File, f)),
-                        path_segments=self.path_segments, next_path_segments=self.next_path_segments)))
-                else:
-                    contents.append(VirtualPath(**mkdict(
-                        self._sub_args, known_data=mkdict(self.known_data.items(), (File, f)))))
-            return contents
 
         if self._file:
             if self._loop_over_path and self._file.is_folder():  # loop over contents of one folder #1
                 if self._file.contents is None:
                     log.warning("Contents of %s were not retrieved, assuming empty", self._file)
                     return []
-                return subfiles_to_virtual_paths(self._file.contents)  # TODO contents should be a future, too
+                files = self._file.contents  # TODO contents should be a future, too
             else:  # everything is already known, no options on this level
-                return [VirtualPath(**self._sub_args)]
+                return [self._sub_path()]
         else:  # all folders still possible
             files = (f for f in self.state.files.result() if
                      isinstance(f, File) and
-                     (not self._file or f.parent == self._file) and
+                     (not self._file or f.parent == self._file) and  # self._file is always False
                      (not self._course or f.course == self._course) and
                      (not self._semester or f.course.semester == self._semester))
-            return subfiles_to_virtual_paths(files)
+
+        return [self._sub_path(new_known_data={File: f}, increment_path_segments=not self._loop_over_path)
+                for f in files]
 
     def access(self, mode):
         pass  # TODO Implement
@@ -173,16 +160,15 @@ class VirtualPath(object):
         if self._semester:
             tokens.update({
                 "semester": self.__escape_file(self._semester.name),
-                "semester-lexical": self.__escape_file(lexicalise_semester(self._semester.name)),
-                "semester-lexical-short": self.__escape_file(lexicalise_semester(self._semester.name, short=True)),
+                "semester-lexical": self.__escape_file(self._semester.lexical),
+                "semester-lexical-short": self.__escape_file(self._semester.lexical_short),
             })
 
         if self._course:
             tokens.update({
                 "semester": self.__escape_file(self._course.semester.name),
-                "semester-lexical": self.__escape_file(lexicalise_semester(self._course.semester.name)),
-                "semester-lexical-short": self.__escape_file(
-                    lexicalise_semester(self._course.semester.name, short=True)),
+                "semester-lexical": self.__escape_file(self._course.semester.lexical),
+                "semester-lexical-short": self.__escape_file(self._course.semester.lexical_short),
 
                 "course-id": self._course.id,
                 "course-abbrev": self.__escape_file(self._course.abbrev),
@@ -198,9 +184,8 @@ class VirtualPath(object):
 
             tokens.update({
                 "semester": self.__escape_file(self._file.course.semester.name),
-                "semester-lexical": self.__escape_file(lexicalise_semester(self._file.course.semester.name)),
-                "semester-lexical-short": self.__escape_file(
-                    lexicalise_semester(self._file.course.semester.name, short=True)),
+                "semester-lexical": self.__escape_file(self._file.course.semester.lexical),
+                "semester-lexical-short": self.__escape_file(self._file.course.semester.lexical_short),
 
                 "course-id": self._file.course.id,
                 "course-abbrev": self.__escape_file(self._file.course.abbrev),
@@ -232,12 +217,20 @@ class VirtualPath(object):
     def _semester(self) -> Semester:
         return self.known_data.get(Semester, None)
 
-    @cached_property
-    def _sub_args(self):
+    def _sub_path(self, new_known_data=None, increment_path_segments=True, **kwargs):
         assert self.is_folder
-        return dict(state=self.state, session=self.session, parent=self, known_data=self.known_data,
-                    path_segments=self.path_segments + [self.next_path_segments[0]],
-                    next_path_segments=self.next_path_segments[1:])
+        args = dict(state=self.state, session=self.session, parent=self, known_data=self.known_data)
+        if increment_path_segments:
+            args.update(path_segments=self.path_segments + [self.next_path_segments[0]],
+                        next_path_segments=self.next_path_segments[1:])
+        else:
+            args.update(path_segments=self.path_segments,
+                        next_path_segments=self.next_path_segments)
+        if new_known_data:
+            args["known_data"] = dict(args["known_data"])
+            args["known_data"].update(new_known_data)
+        args.update(kwargs)
+        return VirtualPath(**args)
 
     @cached_property
     def _loop_over_path(self):
@@ -249,15 +242,16 @@ class VirtualPath(object):
         return hash(self.partial_path)
 
     def __str__(self):
-        # preview the file path we're generating in the loop
-        if self._loop_over_path and File in self.known_data:
+        path_segments = [seg.format(**self._known_tokens) for seg in self.path_segments]
+
+        if self._loop_over_path and self._file:
+            # preview the file path we're generating in the loop
             preview_file_path = self.next_path_segments[0].format(**self._known_tokens)
             if preview_file_path:
-                preview_file_path = "(" + preview_file_path + ")"
-        else:
-            preview_file_path = None
+                path_segments.append("(" + preview_file_path + ")")
 
-        path_segments = self.partial_path.split("/") + [preview_file_path] + self.next_path_segments
+        path_segments += self.next_path_segments
+
         options = "[%s]->[%s]" % (
             ",".join(c.__name__ for c in self.known_data.keys()),
             ",".join(c.__name__ for c in self._content_options))
