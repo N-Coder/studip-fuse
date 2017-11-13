@@ -6,7 +6,7 @@ from asyncio.futures import _chain_future as chain_future
 
 from studip_fuse.async_fetch import AsyncState, main
 from studip_fuse.fs_driver import FUSEView
-from studip_fuse.virtual_path import VirtualPath
+from studip_fuse.virtual_path import RealPath, VirtualPath
 
 
 def async_fetch():
@@ -25,7 +25,7 @@ def async_fetch():
     return state
 
 
-def run_fuse(vp):
+def run_fuse(rp):
     from fuse import FUSE
     import sh
 
@@ -39,7 +39,7 @@ def run_fuse(vp):
     except:
         pass
 
-    fuse_ops = FUSEView(vp)
+    fuse_ops = FUSEView(rp)
     FUSE(fuse_ops, mount_path, nothreads=True, foreground=True)
 
 
@@ -59,6 +59,7 @@ if __name__=="__main__":
     state = async_fetch()
     vp = VirtualPath(state=state, session=None, path_segments=[], known_data={}, parent=None,
                      next_path_segments="{semester-lexical-short}/{course}/{type}/{short-path}/{name}".split("/"))
+    rp = RealPath(parent=None, generating_vps={vp})
     # print_vp_tree(vp)
     print("Starting FUSE")
-    run_fuse(vp)
+    run_fuse(rp)
