@@ -1,5 +1,4 @@
 import functools
-import itertools
 import logging
 from datetime import datetime
 from io import BytesIO
@@ -63,6 +62,9 @@ class VirtualPath(object):
 
     # FS-API  ##########################################################################################################
 
+    # TODO make async and use await instead of result()
+    # TODO use as_completed where possible
+
     @functools.lru_cache()
     def list_contents(self) -> List['VirtualPath']:
         assert self.is_folder
@@ -73,15 +75,19 @@ class VirtualPath(object):
         elif Course in self._content_options:
             if self._course:  # everything is already known, no options on this level
                 return [self._sub_path()]
-            return [self._sub_path(new_known_data={Course: c})
-                    for c in itertools.chain(*self.session.courses.result())
-                    if (not self._semester or c.semester == self._semester)]
+            elif self._semester:
+                return [self._sub_path(new_known_data={Course: c})
+                        for c in self.session.get_courses(self._semester).result()]
+            else:
+                return [self._sub_path(new_known_data={Course: c})
+                        for s in self.session.get_semesters().result()
+                        for c in self.session.get_courses(s).result()]
 
         elif Semester in self._content_options:
             if self._semester:  # everything is already known, no options on this level
                 return [self._sub_path()]
             return [self._sub_path(new_known_data={Semester: s})
-                    for s in self.session.semesters.result()]
+                    for s in self.session.get_semesters().result()]
 
         else:
             assert "{" not in path_head(self.next_path_segments)  # static name
@@ -92,18 +98,24 @@ class VirtualPath(object):
 
         if self._file:
             if self._loop_over_path and self._file.is_folder():  # loop over contents of one folder #1
-                if self._file.contents is None:
-                    log.warning("Contents of %s were not retrieved, assuming empty", self._file)
-                    return []
-                files = self._file.contents  # TODO contents should be a future, too
+                files = [f
+                         for f in self.session.get_folder_files(self._file).result().contents]
+
             else:  # everything is already known, no options on this level
                 return [self._sub_path()]
         else:  # all folders still possible
-            files = (f for f in self.session.files.result() if
-                     isinstance(f, File) and
-                     (not self._file or f.parent == self._file) and  # TODO self._file is always False
-                     (not self._course or f.course == self._course) and
-                     (not self._semester or f.course.semester == self._semester))
+            if self._course:
+                files = [f
+                         for f in self.session.get_course_files(self._course).result().contents]
+            elif self._semester:
+                files = [f
+                         for c in self.session.get_courses(self._semester).result()
+                         for f in self.session.get_course_files(c).result().contents]
+            else:
+                files = [f
+                         for s in self.session.get_semesters().result()
+                         for c in self.session.get_courses(s).result()
+                         for f in self.session.get_course_files(c).result().contents]
 
         return [self._sub_path(new_known_data={File: f}, increment_path_segments=not self._loop_over_path)
                 for f in files]

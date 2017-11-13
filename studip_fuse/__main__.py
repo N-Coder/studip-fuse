@@ -19,14 +19,16 @@ def async_fetch():
     warnings.resetwarnings()
 
     session = loop.run_until_complete(loop.create_task(main()))
+
     pending_tasks = [task for task in asyncio.Task.all_tasks() if not task.done()]
-    if pending_tasks:
+    while pending_tasks:
         logging.warning("%s uncompleted tasks", len(pending_tasks))
         logging.warning("Uncompleted tasks are: %s", pending_tasks)
         try:
             loop.run_until_complete(asyncio.gather(*pending_tasks))
         except:
             logging.warning("Uncompleted task raised an exception", exc_info=True)
+        pending_tasks = [task for task in asyncio.Task.all_tasks() if not task.done()]
 
     loop.run_until_complete(asyncio.sleep(1))
     loop.close()
