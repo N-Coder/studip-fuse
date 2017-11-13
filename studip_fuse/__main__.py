@@ -1,10 +1,12 @@
-import asyncio
 import logging
+
+logging.basicConfig(level=logging.DEBUG)
+
+import asyncio
 import os
 import warnings
-from asyncio.futures import _chain_future as chain_future
 
-from studip_fuse.async_fetch import AsyncState, main
+from studip_fuse.async_fetch import main
 from studip_fuse.fs_driver import FUSEView
 from studip_fuse.virtual_path import RealPath, VirtualPath
 
@@ -13,16 +15,23 @@ def async_fetch():
     loop = asyncio.get_event_loop()
     loop.set_debug(True)
     logging.basicConfig(level=logging.DEBUG)
+    logging.getLogger("asyncio").setLevel(logging.INFO)
     warnings.resetwarnings()
 
-    state = AsyncState()
-    chain_future(loop.create_task(main(state)), state.root)
-    loop.run_until_complete(state.root)
+    session = loop.run_until_complete(loop.create_task(main()))
+    pending_tasks = [task for task in asyncio.Task.all_tasks() if not task.done()]
+    if pending_tasks:
+        logging.warning("%s uncompleted tasks", len(pending_tasks))
+        logging.warning("Uncompleted tasks are: %s", pending_tasks)
+        try:
+            loop.run_until_complete(asyncio.gather(*pending_tasks))
+        except:
+            logging.warning("Uncompleted task raised an exception", exc_info=True)
 
     loop.run_until_complete(asyncio.sleep(1))
     loop.close()
 
-    return state
+    return session
 
 
 def run_fuse(rp):
@@ -55,9 +64,9 @@ def print_vp_tree(vp):
         pass
 
 
-if __name__=="__main__":
-    state = async_fetch()
-    vp = VirtualPath(state=state, session=None, path_segments=[], known_data={}, parent=None,
+if __name__ == "__main__":
+    session = async_fetch()
+    vp = VirtualPath(session=session, path_segments=[], known_data={}, parent=None,
                      next_path_segments="{semester-lexical-short}/{course}/{type}/{short-path}/{name}".split("/"))
     rp = RealPath(parent=None, generating_vps={vp})
     # print_vp_tree(vp)

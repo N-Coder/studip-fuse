@@ -12,17 +12,17 @@ from cached_property import cached_property
 from more_itertools import one, unique_everseen
 
 from studip_api.model import Course, File, Folder, Semester
+from studip_fuse.async_fetch import CachedStudIPSession
 from studip_fuse.path_util import Charset, EscapeMode, escape_file_name, normalize_path, path_head, path_name, path_tail
 
-log = logging.getLogger("studip_fs.virtual_path")
+log = logging.getLogger("studip_fuse.virtual_path")
 iter_log = log.getChild("resolve")
 iter_log.setLevel(logging.INFO)
 
 
 @attr.s(frozen=True, str=False, repr=False, hash=False)
 class VirtualPath(object):
-    state = attr.ib()
-    session = attr.ib()
+    session: CachedStudIPSession = attr.ib()
     path_segments: List[str] = attr.ib()  # {0,n}
     known_data: Dict[Type, Any] = attr.ib()
     parent: Optional['VirtualPath'] = attr.ib()
@@ -74,14 +74,14 @@ class VirtualPath(object):
             if self._course:  # everything is already known, no options on this level
                 return [self._sub_path()]
             return [self._sub_path(new_known_data={Course: c})
-                    for c in itertools.chain(*self.state.courses.result())
+                    for c in itertools.chain(*self.session.courses.result())
                     if (not self._semester or c.semester == self._semester)]
 
         elif Semester in self._content_options:
             if self._semester:  # everything is already known, no options on this level
                 return [self._sub_path()]
             return [self._sub_path(new_known_data={Semester: s})
-                    for s in self.state.semesters.result()]
+                    for s in self.session.semesters.result()]
 
         else:
             assert "{" not in path_head(self.next_path_segments)  # static name
@@ -99,7 +99,7 @@ class VirtualPath(object):
             else:  # everything is already known, no options on this level
                 return [self._sub_path()]
         else:  # all folders still possible
-            files = (f for f in self.state.files.result() if
+            files = (f for f in self.session.files.result() if
                      isinstance(f, File) and
                      (not self._file or f.parent == self._file) and  # TODO self._file is always False
                      (not self._course or f.course == self._course) and
@@ -224,7 +224,7 @@ class VirtualPath(object):
 
     def _sub_path(self, new_known_data=None, increment_path_segments=True, **kwargs):
         assert self.is_folder
-        args = dict(state=self.state, session=self.session, parent=self, known_data=self.known_data)
+        args = dict(session=self.session, parent=self, known_data=self.known_data)
         if increment_path_segments:
             args.update(path_segments=self.path_segments + [path_head(self.next_path_segments)],
                         next_path_segments=path_tail(self.next_path_segments))

@@ -1,30 +1,37 @@
+import argparse as argparse
 import asyncio
 import os
 from asyncio.futures import _chain_future as chain_future
 
-import argparse as argparse
 import attr
+from cached_property import cached_property
 
 from studip_api.session import StudIPSession
+from studip_fuse.async_cache import schedule_task
 
 
 @attr.s
-class AsyncState(object):  # TODO replace by concurrent.futures and load lazily / only when awaited
-    root: asyncio.Future = attr.ib(default=attr.Factory(asyncio.Future))
-    semesters: asyncio.Future = attr.ib(default=attr.Factory(asyncio.Future))  # [List[Semester]]
-    courses: asyncio.Future = attr.ib(default=attr.Factory(asyncio.Future))  # [List[Course]]
-    files: asyncio.Future = attr.ib(default=attr.Factory(asyncio.Future))  # [List[Future[File]]]
+class CachedStudIPSession(StudIPSession):  # TODO replace by concurrent.futures and load lazily / only when awaited
+    root: asyncio.Future = attr.ib(default=None)
+    semesters: asyncio.Future = attr.ib(default=None)  # [List[Semester]]
+    courses: asyncio.Future = attr.ib(default=None)  # [List[Course]]
+    files: asyncio.Future = attr.ib(default=None)  # [List[Future[File]]]
+
+    @cached_property
+    @schedule_task()
+    async def semesters(self):
+        return await self.get_semesters()
 
 
-async def main(state):
+async def main():
     with open(os.path.expanduser('~/.studip-pwd')) as f:
         password = f.read()
 
     parser = argparse.ArgumentParser(description='Stud.IP Fuse')
-    parser.add_argument('user',                        help='username')
+    parser.add_argument('user', help='username')
     args = parser.parse_args()
 
-    async with StudIPSession(
+    async with CachedStudIPSession(
             user_name=args.user,
             password=password,
             studip_base="https://studip.uni-passau.de",
@@ -36,15 +43,19 @@ async def main(state):
         all_files_done, handle_files_future_started = track_pending_files(session)
 
         # List semesters and their courses
-        semester_future = await load_semesters(session, state)
-        courses_futures = await load_courses(session, state, semester_future, handle_files_future_started)
+        semester_future = session.semesters
+        courses_futures = await load_courses(session, session, semester_future, handle_files_future_started)
 
         # Wait for all listings to complete
         await semester_future
         for course_future in courses_futures:
             await course_future
         all_file_futures = await all_files_done()
-        chain_future(asyncio.gather(*all_file_futures, return_exceptions=True), state.files)
+        session.files = asyncio.get_event_loop().create_future()
+        chain_future(asyncio.gather(*all_file_futures, return_exceptions=True), session.files)
+        await session.files
+
+        return session
 
 
 def track_pending_files(session):
@@ -94,6 +105,8 @@ async def load_courses(session, state, semester_future, handle_files_future):
             # if course.number not in ["5792UE", "5792V", "5792"]:
             #     continue
             handle_files_future(asyncio.ensure_future(session.get_course_files(course)))
+
+    state.courses = asyncio.get_event_loop().create_future()
     chain_future(asyncio.gather(*courses_futures), state.courses)
     return courses_futures
 
