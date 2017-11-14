@@ -289,3 +289,6 @@ class VirtualPath(object):
                 options
             ]))
         )
+
+    def __repr__(self):
+        return "VirtualPath(%s)" % str(self)

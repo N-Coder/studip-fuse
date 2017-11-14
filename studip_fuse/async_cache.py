@@ -25,7 +25,7 @@ def schedule_task(schedule_with=asyncio.ensure_future):
             async_cache_log.debug("Scheduling #%s: %s(%s%s)",
                                   my_call_counter, schedule_with.__name__, func.__name__, args)
             future = schedule_with(awrapped(my_call_counter, *args))
-            async_cache_log.debug("Scheduled #%s as %s", my_call_counter, future)
+            # async_cache_log.debug("Scheduled #%s as %s", my_call_counter, future)
             return future
 
         functools.update_wrapper(wrapped, func)

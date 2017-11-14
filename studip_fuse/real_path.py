@@ -127,7 +127,11 @@ class RealPath(object):
         return one(self.generating_vps).open_file(flags)
 
     def __str__(self):
-        return self.path + (" *%s" % len(self.generating_vps) if len(self.generating_vps) > 1 else "")
+        return self.path + ("[root]" if self.is_root else "") + \
+               (" *%s" % len(self.generating_vps) if len(self.generating_vps) > 1 else "")
+
+    def __repr__(self):
+        return "RealPath(%s)" % str(self)
 
     def __hash__(self):
         return hash(self.path)
