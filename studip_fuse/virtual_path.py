@@ -12,8 +12,8 @@ from cached_property import cached_property
 from more_itertools import one, unique_everseen
 
 from studip_api.model import Course, File, Folder, Semester
+from studip_api.session import StudIPSession
 from studip_fuse.async_cache import schedule_task
-from studip_fuse.async_fetch import CachedStudIPSession
 from studip_fuse.path_util import Charset, EscapeMode, escape_file_name, normalize_path, path_head, path_name, path_tail
 
 log = logging.getLogger("studip_fuse.virtual_path")
@@ -23,7 +23,7 @@ iter_log.setLevel(logging.INFO)
 
 @attr.s(frozen=True, str=False, repr=False, hash=False)
 class VirtualPath(object):
-    session: CachedStudIPSession = attr.ib()
+    session: 'StudIPSession' = attr.ib()
     path_segments: List[str] = attr.ib()  # {0,n}
     known_data: Dict[Type, Any] = attr.ib()
     parent: Optional['VirtualPath'] = attr.ib()
@@ -135,7 +135,7 @@ class VirtualPath(object):
                 for f in files]
 
     def access(self, mode):
-        pass  # TODO Implement
+        pass  # TODO implement
         # if not os.access(sub_vps[0].cache_path, mode):
         #     raise FuseOSError(errno.EACCES)
 
@@ -150,7 +150,7 @@ class VirtualPath(object):
     def open_file(self, flags) -> BytesIO:  # blocking,
         assert not self.is_folder
         return None
-        # TODO implement, download missing files to cache
+        # TODO implement, download missing files to cache -> make this function and callers up to FUSE driver async
         # return os.open(sub_vps[0].cache_path, flags)
 
     # private properties ###############################################################################################
@@ -330,7 +330,7 @@ class RealPath(object):
             await gather(*futures)
 
     @functools.lru_cache()
-    @schedule_task
+    @schedule_task()
     async def resolve(self, rel_path) -> Optional['RealPath']:
         rel_path = normalize_path(rel_path)
         iter_log.debug("Resolving path '%s' relative to '%s'", rel_path, self)
@@ -358,7 +358,7 @@ class RealPath(object):
             return None
 
     @functools.lru_cache()
-    @schedule_task
+    @schedule_task()
     async def list_contents(self) -> List['RealPath']:
         # merge duplicate sub-entries by putting them in the same Set
         # (required e.g. for folder with lecture name and subfolder with course type)

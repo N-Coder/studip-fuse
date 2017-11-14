@@ -1,6 +1,9 @@
+import asyncio
 import errno
+import functools
 import logging
 import os
+from typing import List
 
 import attr
 from fuse import Operations
@@ -8,26 +11,34 @@ from fuse import Operations
 from studip_fuse.path_util import path_name
 from studip_fuse.virtual_path import RealPath
 
-log = logging.getLogger("studip_fs.fs_drive")
+log = logging.getLogger("studip_fuse.fs_drive")
 
 
 @attr.s(frozen=True)
 class FUSEView(Operations):
     root_rp: RealPath = attr.ib()
 
+    @functools.lru_cache()  # TODO refactor multi-level caching
     def _resolve(self, partial: str) -> RealPath:
-        resolved_real_file = self.root_rp.resolve(partial)
+        return asyncio.run_coroutine_threadsafe(self._aresolve(partial), asyncio.get_event_loop()).result()
+
+    async def _aresolve(self, partial: str) -> RealPath:
+        resolved_real_file = await self.root_rp.resolve(partial)
         if not resolved_real_file:
             raise OSError(errno.ENOENT, "No such file or directory", partial)
         else:
             return resolved_real_file
 
-    def readdir(self, path, fh):
-        resolved_real_file = self._resolve(path)
-        if resolved_real_file.is_folder:
-            return ['.', '..'] + [path_name(rp.path) for rp in resolved_real_file.list_contents()]
-        else:
-            raise OSError(errno.ENOTDIR)
+    @functools.lru_cache()
+    def readdir(self, path, fh) -> List[str]:
+        async def _async() -> List[str]:
+            resolved_real_file = await self._aresolve(path)
+            if resolved_real_file.is_folder:
+                return ['.', '..'] + [path_name(rp.path) for rp in await resolved_real_file.list_contents()]
+            else:
+                raise OSError(errno.ENOTDIR)
+
+        return asyncio.run_coroutine_threadsafe(_async(), asyncio.get_event_loop()).result()
 
     def access(self, path, mode):
         return self._resolve(path).access(mode)
