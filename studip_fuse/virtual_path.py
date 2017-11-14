@@ -1,5 +1,6 @@
 import functools
 import logging
+from asyncio import as_completed, gather
 from datetime import datetime
 from io import BytesIO
 from os import path
@@ -11,6 +12,7 @@ from cached_property import cached_property
 from more_itertools import one, unique_everseen
 
 from studip_api.model import Course, File, Folder, Semester
+from studip_fuse.async_cache import schedule_task
 from studip_fuse.async_fetch import CachedStudIPSession
 from studip_fuse.path_util import Charset, EscapeMode, escape_file_name, normalize_path, path_head, path_name, path_tail
 
@@ -62,60 +64,72 @@ class VirtualPath(object):
 
     # FS-API  ##########################################################################################################
 
-    # TODO make async and use await instead of result()
-    # TODO use as_completed where possible
-
     @functools.lru_cache()
-    def list_contents(self) -> List['VirtualPath']:
+    @schedule_task()
+    async def list_contents(self) -> List['VirtualPath']:
         assert self.is_folder
 
         if File in self._content_options:
-            return self._list_contents_file_options()
+            return await self._list_contents_file_options()
 
         elif Course in self._content_options:
             if self._course:  # everything is already known, no options on this level
                 return [self._sub_path()]
             elif self._semester:
                 return [self._sub_path(new_known_data={Course: c})
-                        for c in self.session.get_courses(self._semester).result()]
+                        for c in await self.session.get_courses(self._semester)]
             else:
-                return [self._sub_path(new_known_data={Course: c})
-                        for s in self.session.get_semesters().result()
-                        for c in self.session.get_courses(s).result()]
+                return [
+                    # using `as_completed`, first schedule `get_courses` for all `s`, then await the results
+                    # if `get_courses` would be directly awaited, scheduling and execution would be sequential
+                    self._sub_path(new_known_data={Course: await fc})
+                    for fc in as_completed(
+                        self.session.get_courses(s)
+                        for s in await self.session.get_semesters()
+                    )]
 
         elif Semester in self._content_options:
             if self._semester:  # everything is already known, no options on this level
                 return [self._sub_path()]
             return [self._sub_path(new_known_data={Semester: s})
-                    for s in self.session.get_semesters().result()]
+                    for s in await self.session.get_semesters()]
 
         else:
             assert "{" not in path_head(self.next_path_segments)  # static name
             return [self._sub_path()]
 
-    def _list_contents_file_options(self):
+    async def _list_contents_file_options(self) -> List['VirtualPath']:
         assert self.is_folder
 
         if self._file:
             if self._loop_over_path and self._file.is_folder():  # loop over contents of one folder #1
                 files = [f
-                         for f in self.session.get_folder_files(self._file).result().contents]
+                         for f in (await self.session.get_folder_files(self._file)).contents]
 
             else:  # everything is already known, no options on this level
                 return [self._sub_path()]
         else:  # all folders still possible
             if self._course:
                 files = [f
-                         for f in self.session.get_course_files(self._course).result().contents]
+                         for f in (await self.session.get_course_files(self._course)).contents]
             elif self._semester:
-                files = [f
-                         for c in self.session.get_courses(self._semester).result()
-                         for f in self.session.get_course_files(c).result().contents]
+                files = [
+                    (await ff).contents
+                    for ff in as_completed(
+                        self.session.get_course_files(c)
+                        for c in await self.session.get_courses(self._semester)
+                    )]
             else:
-                files = [f
-                         for s in self.session.get_semesters().result()
-                         for c in self.session.get_courses(s).result()
-                         for f in self.session.get_course_files(c).result().contents]
+                files = [
+                    (await ff).contents
+                    for ff in as_completed(
+                        # the following await lead to partially sequential execution in very rare cases
+                        self.session.get_course_files(await fc)
+                        for fc in as_completed(
+                            self.session.get_courses(s)
+                            for s in await self.session.get_semesters()
+                        )
+                    )]
 
         return [self._sub_path(new_known_data={File: f}, increment_path_segments=not self._loop_over_path)
                 for f in files]
@@ -302,16 +316,22 @@ class RealPath(object):
     def is_root(self) -> bool:
         return not self.parent
 
-    def iterate_hierarchically(self, visitor: Callable[['RealPath', int], bool], level: int = 1):
-        contents = self.list_contents()
+    async def iterate_hierarchically(self, visitor: Callable[['RealPath', int], bool], level: int = 1):
+        contents = await self.list_contents()
         iter_log.debug("Found %s unique children of '%s', recursing...", len(contents), self)
+        futures = []
         for file in contents:
             go_deeper = visitor(file, level)  # TODO cancellation / StopIteration?
             if go_deeper and self.is_folder:
-                file.iterate_hierarchically(visitor, level + 1)
+                futures.append(
+                    file.iterate_hierarchically(visitor, level + 1)
+                )
+        if futures:
+            await gather(*futures)
 
     @functools.lru_cache()
-    def resolve(self, rel_path):  # TODO cache async coroutine
+    @schedule_task
+    async def resolve(self, rel_path) -> Optional['RealPath']:
         rel_path = normalize_path(rel_path)
         iter_log.debug("Resolving path '%s' relative to '%s'", rel_path, self)
 
@@ -320,12 +340,12 @@ class RealPath(object):
             return self
 
         resolved_real_file = content_file = None
-        for content_file in self.list_contents():
+        for content_file in await self.list_contents():
             if rel_path == content_file.path:  # Exact Match
                 resolved_real_file = content_file
                 break
             elif path_head(rel_path) == path_name(content_file.path):  # Found Parent
-                resolved_real_file = content_file.resolve(path_tail(rel_path))
+                resolved_real_file = await content_file.resolve(path_tail(rel_path))
                 break
             else:  # Other File
                 continue
@@ -338,7 +358,8 @@ class RealPath(object):
             return None
 
     @functools.lru_cache()
-    def list_contents(self) -> List['RealPath']:  # TODO cache async coroutine
+    @schedule_task
+    async def list_contents(self) -> List['RealPath']:
         # merge duplicate sub-entries by putting them in the same Set
         # (required e.g. for folder with lecture name and subfolder with course type)
         contents: Dict[str, Set[VirtualPath]] = dict()
@@ -350,15 +371,19 @@ class RealPath(object):
         iter_log.debug("Got %s VirtualPaths generating path '%s', listing contents...",
                        len(contents[self.path]), self)
 
+        async def __update_contents_map(no_progress_vp):
+            for sub_vp in await no_progress_vp.list_contents():
+                contents.setdefault(sub_vp.partial_path, set()).add(sub_vp)
+
         # skip paths that make no progress
         # (required e.g. for the VirtualPath for "Allgemeiner Dateiordner")
         while contents.get(self.path, None):
             iter_log.debug("Flattening %s paths that are still on the initial level of '%s'...",
                            len(contents[self.path]), self)
-            for no_progress_vp in contents.pop(self.path):
-                assert no_progress_vp.is_folder
-                for sub_vp in no_progress_vp.list_contents():
-                    contents.setdefault(sub_vp.partial_path, set()).add(sub_vp)
+            # call `list_contents` for all `no_progress_vp`s in parallel and await completion by gathering the Tasks
+            await gather(*(
+                __update_contents_map(no_progress_vp) for no_progress_vp in contents.pop(self.path)
+            ))
 
         return [RealPath(self, vps) for vps in contents.values()]
 
