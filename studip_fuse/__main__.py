@@ -1,5 +1,4 @@
 import logging
-from threading import Thread
 
 logging.basicConfig(level=logging.INFO)
 
@@ -8,6 +7,7 @@ import asyncio
 import functools
 import os
 import sys
+from threading import Thread
 import warnings
 
 import attr
@@ -17,7 +17,8 @@ from fuse import FUSE
 from studip_api.session import StudIPSession
 from studip_fuse.async_cache import schedule_task
 from studip_fuse.fs_driver import FUSEView
-from studip_fuse.virtual_path import RealPath, VirtualPath
+from studip_fuse.virtual_path import VirtualPath
+from studip_fuse.real_path import RealPath
 
 
 @attr.s(hash=False)

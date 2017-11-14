@@ -9,7 +9,7 @@ import attr
 from fuse import Operations
 
 from studip_fuse.path_util import path_name
-from studip_fuse.virtual_path import RealPath
+from studip_fuse.real_path import RealPath
 
 log = logging.getLogger("studip_fuse.fs_drive")
 

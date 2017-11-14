@@ -1,6 +1,9 @@
 import re
 from enum import IntEnum
 from os.path import normpath
+from typing import Set, Type
+
+from studip_api.model import Course, File, Semester
 
 PUNCTUATION_WHITESPACE_RE = re.compile(r"[ _/.,;:\-_#'+*~!^\"$%&/()[\]}{\\?<>|]+")
 NON_ASCII_RE = re.compile(r"[^\x00-\x7f]+")
@@ -87,3 +90,17 @@ def __test_paths():
         assert path_tail(test_path) == tail
         assert path_parent(test_path) == parent
         assert path_name(test_path) == name
+
+
+def get_format_segment_requires(format_segment) -> Set[Type]:
+    # FIXME breaks when value formatting options are used
+    requirements = set()
+    if any(t in format_segment for t in ["{semester}", "{semester-lexical}", "{semester-lexical-short}"]):
+        requirements.add(Semester)
+    if any(t in format_segment for t in ["{course}", "{course-abbrev}", "{course-id}", "{type}", "{type-abbrev}"]):
+        requirements.add(Course)
+    if any(t in format_segment for t in ["{path}", "{short-path}", "{id}", "{name}", "{description}", "{author}"]):
+        requirements.add(File)
+    if "{time}" in format_segment and not requirements:  # any info can provide a time
+        requirements.add(Semester)
+    return requirements
