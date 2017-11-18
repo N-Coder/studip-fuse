@@ -24,6 +24,9 @@ if __name__ == "__main__":
             "argparse",
             "appdirs"
         ],
+        entry_points={
+            "console_scripts": ["studip-fuse = studip_fuse.__main__:main"]
+        },
         version=version,
         description="Python FUSE drive for courses and files available through the Stud.IP University Access Portal",
         long_description=long_descr,

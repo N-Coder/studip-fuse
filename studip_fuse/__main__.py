@@ -48,6 +48,7 @@ class CachedStudIPSession(StudIPSession):
     @functools.lru_cache()
     @schedule_task()
     async def download_file_contents(self, file, dest=None, chunk_size=1024 * 256):
+        # TODO check integrity of existing paths and reuse them
         if not dest:
             dest = os.path.join(self.cache_dir, file.id)
         return await super().download_file_contents(file, dest)
@@ -61,12 +62,21 @@ async def shutdown_loop(loop, session):
     logging.debug("Loop drained")
 
 
-if __name__ == "__main__":
-    mount_path = os.path.realpath(os.path.expanduser("~/studip/mount"))
-    cache_path = os.path.realpath(os.path.expanduser("~/studip/cache"))
+def main():
+    from studip_fuse import __version__ as prog_version
+
+    mkpath = lambda p: os.path.realpath(os.path.expanduser(p))
     parser = argparse.ArgumentParser(description='Stud.IP Fuse')
-    parser.add_argument('user', help='username')
+    parser.add_argument('--user', help='username', required=True)
+    parser.add_argument('--pwfile', help='password file', default=mkpath('~/.studip-pw'))
+    parser.add_argument('--format', help='path format',
+                        default="{semester-lexical-short}/{course}/{type}/{short-path}/{name}")
+    parser.add_argument('--mount', help='mount path', default=mkpath("~/studip/mount"))
+    parser.add_argument('--cache', help='cache oath', default=mkpath("~/studip/cache"))
+    parser.add_argument('--studip', help='Stud.IP base URL', default="https://studip.uni-passau.de")
+    parser.add_argument('--sso', help='SSO base URL', default="https://sso.uni-passau.de")
     parser.add_argument('--debug', help='enable debug mode', action='store_true')
+    parser.add_argument('--version', action='version', version="%(prog)s " + prog_version)
     args = parser.parse_args()
 
     loop = asyncio.get_event_loop()
@@ -76,40 +86,40 @@ if __name__ == "__main__":
         logging.root.setLevel(logging.DEBUG)
         warnings.resetwarnings()
 
-    loop_thread = Thread(target=loop.run_forever, name="loop")
+    loop_thread = Thread(target=loop.run_forever, name="aio event loop")
     loop_thread.start()
 
     logging.info("Opening StudIP session")
-    with open(os.path.expanduser('~/.studip-pwd')) as f:
+    with open(args.pwfile) as f:
         password = f.read()
     session = asyncio.run_coroutine_threadsafe(CachedStudIPSession(
         user_name=args.user,
         password=password,
-        studip_base="https://studip.uni-passau.de",
-        sso_base="https://sso.uni-passau.de",
-        cache_dir=cache_path
+        studip_base=args.studip,
+        sso_base=args.sso,
+        cache_dir=args.cache
     ).__aenter__(), loop).result()
     password = ""
 
     try:
         logging.info("Initializing virtual file system")
         vp = VirtualPath(session=session, path_segments=[], known_data={}, parent=None,
-                         next_path_segments="{semester-lexical-short}/{course}/{type}/{short-path}/{name}".split("/"))
+                         next_path_segments=args.format.split("/"))
         rp = RealPath(parent=None, generating_vps={vp})
 
         try:
-            sh.fusermount("-u", mount_path)
+            sh.fusermount("-u", args.mount)
         except sh.ErrorReturnCode as e:
-            if "entry for %s not found in" % mount_path not in str(e):
-                logging.warning("Could not unmount mount path %s", mount_path, exc_info=True)
+            if "entry for %s not found in" % args.mount not in str(e):
+                logging.warning("Could not unmount mount path %s", args.mount, exc_info=True)
             else:
                 logging.debug(e.stderr.decode("UTF-8", "replace").strip().split("\n")[-1])
-        os.makedirs(mount_path, exist_ok=True)
-        os.makedirs(cache_path, exist_ok=True)
+        os.makedirs(args.mount, exist_ok=True)
+        os.makedirs(args.cache, exist_ok=True)
 
         logging.info("Handing over to FUSE driver")
         fuse_ops = FUSEView(rp)
-        FUSE(fuse_ops, mount_path, nothreads=True, foreground=True)
+        FUSE(fuse_ops, args.mount, nothreads=True, foreground=True)
     except:
         logging.error("FUSE driver interrupted", exc_info=True)
     finally:
@@ -125,3 +135,7 @@ if __name__ == "__main__":
         logging.debug("Event loop drained, closing")
         loop.close()
         logging.info("Event loop closed")
+
+
+if __name__ == "__main__":
+    main()
