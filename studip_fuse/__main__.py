@@ -85,6 +85,8 @@ def main():
         loop.set_debug(True)
         logging.root.setLevel(logging.DEBUG)
         warnings.resetwarnings()
+    else:
+        logging.getLogger("sh").setLevel(logging.WARNING)
 
     loop_thread = Thread(target=loop.run_forever, name="aio event loop")
     loop_thread.start()
@@ -117,7 +119,7 @@ def main():
         os.makedirs(args.mount, exist_ok=True)
         os.makedirs(args.cache, exist_ok=True)
 
-        logging.info("Handing over to FUSE driver")
+        logging.info("Handing over to FUSE driver")  # TODO offline support?
         fuse_ops = FUSEView(rp)
         FUSE(fuse_ops, args.mount, nothreads=True, foreground=True)
     except:

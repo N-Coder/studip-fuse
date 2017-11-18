@@ -222,7 +222,7 @@ class VirtualPath(object):
                 "name": self.__escape_file(self._file.name),
                 "description": self.__escape_file(self._file.description or ""),
                 "author": self.__escape_file(self._file.author or ""),
-                # "ext": extension,
+                # "ext": extension, #TODO add separate file extension, guess from mime if needed
                 # "descr-no-ext": self.__escape_file(descr_no_ext),
             })
         return tokens

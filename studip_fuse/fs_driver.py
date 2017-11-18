@@ -22,7 +22,7 @@ def await_async(coro):
 class FUSEView(Operations):
     root_rp: RealPath = attr.ib()
 
-    @functools.lru_cache()  # TODO refactor multi-level caching
+    @functools.lru_cache()  # TODO refactor multi-level caching, add ttl / SIGUSR-based clearing
     def _resolve(self, partial: str) -> RealPath:
         return await_async(self._aresolve(partial))
 
@@ -38,6 +38,7 @@ class FUSEView(Operations):
         async def _async() -> List[str]:
             resolved_real_file = await self._aresolve(path)
             if resolved_real_file.is_folder:
+                # TODO rename or hide certain files / folders / courses / ...
                 return ['.', '..'] + [path_name(rp.path) for rp in await resolved_real_file.list_contents()]
             else:
                 raise OSError(errno.ENOTDIR)
