@@ -1,8 +1,8 @@
 import functools
 import logging
+import os
 from asyncio import as_completed
 from datetime import datetime
-from io import BytesIO
 from os import path
 from stat import S_IFDIR, S_IFREG
 from typing import Any, Dict, List, Optional, Set, Tuple, Type
@@ -149,11 +149,11 @@ class VirtualPath(object):
         #     d["st_size"] = len(self.list_contents().result())
         return d
 
-    def open_file(self, flags) -> BytesIO:  # blocking,
+    # TODO implement, download missing files to cache -> make this function and callers up to FUSE driver async
+    async def open_file(self, flags):  # blocking,
         assert not self.is_folder
-        return None
-        # TODO implement, download missing files to cache -> make this function and callers up to FUSE driver async
-        # return os.open(sub_vps[0].cache_path, flags)
+        path = await self.session.download_file_contents(self._file)
+        return os.open(path, flags)
 
     # private properties ###############################################################################################
 

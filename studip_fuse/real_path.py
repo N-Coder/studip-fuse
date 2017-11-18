@@ -1,7 +1,6 @@
 import functools
 import logging
 from asyncio import gather
-from io import BytesIO
 from typing import Callable, Dict, List, Optional, Set
 
 import attr
@@ -123,7 +122,7 @@ class RealPath(object):
         return {key: val for key, val in st.items() if key in
                 ('st_atime', 'st_ctime', 'st_gid', 'st_mode', 'st_mtime', 'st_nlink', 'st_size', 'st_uid')}
 
-    def open_file(self, flags) -> BytesIO:
+    def open_file(self, flags):
         return one(self.generating_vps).open_file(flags)
 
     def __str__(self):

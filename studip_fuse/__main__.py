@@ -23,6 +23,8 @@ from studip_fuse.real_path import RealPath
 
 @attr.s(hash=False)
 class CachedStudIPSession(StudIPSession):
+    cache_dir: str = attr.ib()
+
     @functools.lru_cache()
     @schedule_task()
     async def get_semesters(self):
@@ -43,6 +45,13 @@ class CachedStudIPSession(StudIPSession):
     async def get_folder_files(self, folder):
         return await super().get_folder_files(folder)
 
+    @functools.lru_cache()
+    @schedule_task()
+    async def download_file_contents(self, file, dest=None, chunk_size=1024 * 256):
+        if not dest:
+            dest = os.path.join(self.cache_dir, file.id)
+        return await super().download_file_contents(file, dest)
+
 
 async def shutdown_loop(loop, session):
     await session.__aexit__(*sys.exc_info())
@@ -53,6 +62,8 @@ async def shutdown_loop(loop, session):
 
 
 if __name__ == "__main__":
+    mount_path = os.path.realpath(os.path.expanduser("~/studip/mount"))
+    cache_path = os.path.realpath(os.path.expanduser("~/studip/cache"))
     parser = argparse.ArgumentParser(description='Stud.IP Fuse')
     parser.add_argument('user', help='username')
     parser.add_argument('debug', help='enable debug mode', action='store_true')
@@ -75,7 +86,8 @@ if __name__ == "__main__":
         user_name=args.user,
         password=password,
         studip_base="https://studip.uni-passau.de",
-        sso_base="https://sso.uni-passau.de"
+        sso_base="https://sso.uni-passau.de",
+        cache_dir=cache_path
     ).__aenter__(), loop).result()
     password = ""
 
@@ -85,8 +97,6 @@ if __name__ == "__main__":
         rp = RealPath(parent=None, generating_vps={vp})
 
         logging.info("Starting FUSE driver")
-        mount_path = os.path.realpath(os.path.expanduser("~/studip/mount"))
-        cache_path = os.path.realpath(os.path.expanduser("~/studip/cache"))
 
         try:
             os.makedirs(mount_path, exist_ok=True)
