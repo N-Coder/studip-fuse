@@ -143,6 +143,10 @@ class VirtualPath(object):
             d["st_ctime"] = self.mod_times[0].timestamp()
         if self.mod_times[1]:
             d["st_mtime"] = self.mod_times[1].timestamp()
+        if not self.is_folder:
+            d["st_size"] = self._file.size
+        # elif self.list_contents().done(): #FIXME wrong thread
+        #     d["st_size"] = len(self.list_contents().result())
         return d
 
     def open_file(self, flags) -> BytesIO:  # blocking,
