@@ -14,13 +14,17 @@ from studip_fuse.real_path import RealPath
 log = logging.getLogger("studip_fuse.fs_drive")
 
 
+def await_async(coro):
+    return asyncio.run_coroutine_threadsafe(coro, asyncio.get_event_loop()).result()
+
+
 @attr.s(frozen=True)
 class FUSEView(Operations):
     root_rp: RealPath = attr.ib()
 
     @functools.lru_cache()  # TODO refactor multi-level caching
     def _resolve(self, partial: str) -> RealPath:
-        return asyncio.run_coroutine_threadsafe(self._aresolve(partial), asyncio.get_event_loop()).result()
+        return await_async(self._aresolve(partial))
 
     async def _aresolve(self, partial: str) -> RealPath:
         resolved_real_file = await self.root_rp.resolve(partial)
@@ -38,7 +42,7 @@ class FUSEView(Operations):
             else:
                 raise OSError(errno.ENOTDIR)
 
-        return asyncio.run_coroutine_threadsafe(_async(), asyncio.get_event_loop()).result()
+        return await_async(_async())
 
     def access(self, path, mode):
         return self._resolve(path).access(mode)
@@ -51,7 +55,7 @@ class FUSEView(Operations):
         if resolved_real_file.is_folder:
             raise OSError(errno.EISDIR)
         else:
-            return resolved_real_file.open_file(flags)
+            return await_async(resolved_real_file.open_file(flags))
 
     def read(self, path, length, offset, fh):
         os.lseek(fh, offset, os.SEEK_SET)  # TODO make lazy

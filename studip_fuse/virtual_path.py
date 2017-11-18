@@ -149,8 +149,7 @@ class VirtualPath(object):
         #     d["st_size"] = len(self.list_contents().result())
         return d
 
-    # TODO implement, download missing files to cache -> make this function and callers up to FUSE driver async
-    async def open_file(self, flags):  # blocking,
+    async def open_file(self, flags):
         assert not self.is_folder
         path = await self.session.download_file_contents(self._file)
         return os.open(path, flags)
@@ -200,6 +199,7 @@ class VirtualPath(object):
             })
 
         if self._file:
+            # FIXME 2017WS/StudIP Sync Testers/Studien--Arbeitsgruppe/Arbeitsgruppe- StudIP Sync Testers/Allgemeiner Dateiordner/
             path = short_path = self._file.path.split("/")[2:-1]  # ''/'1234VL-Name'/[path]/'file_name'
             if short_path[0:1] == ["Allgemeiner Dateiordner"]:
                 short_path = path_tail(short_path)
