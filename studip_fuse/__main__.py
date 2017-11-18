@@ -55,10 +55,10 @@ class CachedStudIPSession(StudIPSession):
 
 async def shutdown_loop(loop, session):
     await session.__aexit__(*sys.exc_info())
+    logging.debug("Session closed")
     await asyncio.sleep(1)
     await loop.shutdown_asyncgens()
-    loop.stop()
-    loop.close()
+    logging.debug("Loop drained")
 
 
 if __name__ == "__main__":
@@ -66,7 +66,7 @@ if __name__ == "__main__":
     cache_path = os.path.realpath(os.path.expanduser("~/studip/cache"))
     parser = argparse.ArgumentParser(description='Stud.IP Fuse')
     parser.add_argument('user', help='username')
-    parser.add_argument('debug', help='enable debug mode', action='store_true')
+    parser.add_argument('--debug', help='enable debug mode', action='store_true')
     args = parser.parse_args()
 
     loop = asyncio.get_event_loop()
@@ -92,22 +92,36 @@ if __name__ == "__main__":
     password = ""
 
     try:
+        logging.info("Initializing virtual file system")
         vp = VirtualPath(session=session, path_segments=[], known_data={}, parent=None,
                          next_path_segments="{semester-lexical-short}/{course}/{type}/{short-path}/{name}".split("/"))
         rp = RealPath(parent=None, generating_vps={vp})
 
-        logging.info("Starting FUSE driver")
-
         try:
-            os.makedirs(mount_path, exist_ok=True)
-            os.makedirs(cache_path, exist_ok=True)
             sh.fusermount("-u", mount_path)
-        except:
-            pass
+        except sh.ErrorReturnCode as e:
+            if "entry for %s not found in" % mount_path not in str(e):
+                logging.warning("Could not unmount mount path %s", mount_path, exc_info=True)
+            else:
+                logging.debug(e.stderr.decode("UTF-8", "replace").strip().split("\n")[-1])
+        os.makedirs(mount_path, exist_ok=True)
+        os.makedirs(cache_path, exist_ok=True)
 
+        logging.info("Handing over to FUSE driver")
         fuse_ops = FUSEView(rp)
         FUSE(fuse_ops, mount_path, nothreads=True, foreground=True)
+    except:
+        logging.error("FUSE driver interrupted", exc_info=True)
     finally:
         logging.info("Shutting down")
-        asyncio.run_coroutine_threadsafe(shutdown_loop(loop, session), loop)
-        loop_thread.join()
+        loop.stop()
+        logging.debug("Interrupted loop thread, waiting for join")
+        loop_thread.join(timeout=5)
+        while loop_thread.is_alive():
+            logging.warning("Waiting for loop thread interrupt...")
+            loop_thread.join(timeout=5)
+        logging.debug("Taking over event loop and draining")
+        loop.run_until_complete(shutdown_loop(loop, session))
+        logging.debug("Event loop drained, closing")
+        loop.close()
+        logging.info("Event loop closed")
