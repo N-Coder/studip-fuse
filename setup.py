@@ -22,7 +22,8 @@ if __name__ == "__main__":
             "studip-api=="+version,
             "fusepy",
             "argparse",
-            "appdirs"
+            "appdirs",
+            "sh"
         ],
         entry_points={
             "console_scripts": ["studip-fuse = studip_fuse.__main__:main"]
