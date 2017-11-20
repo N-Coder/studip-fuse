@@ -200,8 +200,7 @@ class VirtualPath(object):
             })
 
         if self._file:
-            # FIXME 2017WS/StudIP Sync Testers/Studien--Arbeitsgruppe/Arbeitsgruppe- StudIP Sync Testers/Allgemeiner Dateiordner/
-            path = short_path = self._file.path.split("/")[2:-1]  # ''/'1234VL-Name'/[path]/'file_name'
+            path = short_path = self._file.path[2:-1]  # ''/'1234VL-Name'/[path]/'file_name'
             if short_path[0:1] == ["Allgemeiner Dateiordner"]:
                 short_path = path_tail(short_path)
 
