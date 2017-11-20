@@ -77,6 +77,8 @@ def main():
     parser.add_argument('--studip', help='Stud.IP base URL', default="https://studip.uni-passau.de")
     parser.add_argument('--sso', help='SSO base URL', default="https://sso.uni-passau.de")
     parser.add_argument('--debug', help='enable debug mode', action='store_true')
+    parser.add_argument('--allowroot', help='allow root to access the mounted directory (required for overlayFS)',
+                        action='store_true')
     parser.add_argument('--version', action='version', version="%(prog)s " + prog_version)
     args = parser.parse_args()
 
@@ -125,7 +127,7 @@ def main():
 
         logging.info("Handing over to FUSE driver")  # TODO offline support?
         fuse_ops = FUSEView(rp, loop)
-        FUSE(fuse_ops, args.mount, foreground=True, allow_root=True, debug=args.debug)
+        FUSE(fuse_ops, args.mount, foreground=True, allow_root=args.allowroot, debug=args.debug)
     except:
         logging.error("FUSE driver interrupted", exc_info=True)
     finally:
