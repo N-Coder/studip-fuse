@@ -138,7 +138,8 @@ class VirtualPath(object):
         #     raise FuseOSError(errno.EACCES)
 
     def getattr(self):
-        d = dict(st_mode=(S_IFDIR if self.is_folder else S_IFREG) | 0o755, st_nlink=2)
+        d = dict(st_ino=hash(self.partial_path), st_mode=(S_IFDIR if self.is_folder else S_IFREG) | 0o755,
+                 st_uid=os.getuid(), st_gid=os.getgid(), st_nlink=1)
         if self.mod_times[0]:
             d["st_ctime"] = self.mod_times[0].timestamp()
         if self.mod_times[1]:
@@ -146,7 +147,7 @@ class VirtualPath(object):
         if not self.is_folder:
             d["st_size"] = self._file.size
         # elif self.list_contents().done(): #FIXME wrong thread
-        #     d["st_size"] = len(self.list_contents().result())
+        #     d["st_nlink"] = len(self.list_contents().result())
         return d
 
     async def open_file(self, flags):
