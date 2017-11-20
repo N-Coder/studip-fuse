@@ -1,4 +1,5 @@
 import logging
+from getpass import getpass
 
 logging.basicConfig(level=logging.INFO)
 
@@ -92,11 +93,14 @@ def main():
     loop_thread.start()
 
     logging.info("Opening StudIP session")
-    with open(args.pwfile) as f:
-        password = f.read()
+    if args.pwfile == "-":
+        password = getpass()
+    else:
+        with open(args.pwfile) as f:
+            password = f.read()
     session = asyncio.run_coroutine_threadsafe(CachedStudIPSession(
         user_name=args.user,
-        password=password,
+        password=password.strip(),
         studip_base=args.studip,
         sso_base=args.sso,
         cache_dir=args.cache
@@ -112,7 +116,7 @@ def main():
         try:
             sh.fusermount("-u", args.mount)
         except sh.ErrorReturnCode as e:
-            if "entry for %s not found in" % args.mount not in str(e):
+            if "entry for" not in str(e) or "not found in" not in str(e):
                 logging.warning("Could not unmount mount path %s", args.mount, exc_info=True)
             else:
                 logging.debug(e.stderr.decode("UTF-8", "replace").strip().split("\n")[-1])
