@@ -14,17 +14,17 @@ from studip_fuse.real_path import RealPath
 log = logging.getLogger("studip_fuse.fs_drive")
 
 
-def await_async(coro):
-    return asyncio.run_coroutine_threadsafe(coro, asyncio.get_event_loop()).result()
-
-
 @attr.s(frozen=True)
 class FUSEView(Operations):
     root_rp: RealPath = attr.ib()
+    loop = attr.ib(hash=False)
+
+    def await_async(self, coro):
+        return asyncio.run_coroutine_threadsafe(coro, self.loop).result()
 
     @functools.lru_cache()  # TODO refactor multi-level caching, add ttl / SIGUSR-based clearing
     def _resolve(self, partial: str) -> RealPath:
-        return await_async(self._aresolve(partial))
+        return self.await_async(self._aresolve(partial))
 
     async def _aresolve(self, partial: str) -> RealPath:
         resolved_real_file = await self.root_rp.resolve(partial)
@@ -38,12 +38,11 @@ class FUSEView(Operations):
         async def _async() -> List[str]:
             resolved_real_file = await self._aresolve(path)
             if resolved_real_file.is_folder:
-                # TODO rename or hide certain files / folders / courses / ...
                 return ['.', '..'] + [path_name(rp.path) for rp in await resolved_real_file.list_contents()]
             else:
                 raise OSError(errno.ENOTDIR)
 
-        return await_async(_async())
+        return self.await_async(_async())
 
     def access(self, path, mode):
         return self._resolve(path).access(mode)
@@ -56,7 +55,7 @@ class FUSEView(Operations):
         if resolved_real_file.is_folder:
             raise OSError(errno.EISDIR)
         else:
-            return await_async(resolved_real_file.open_file(flags))
+            return self.await_async(resolved_real_file.open_file(flags))
 
     def read(self, path, length, offset, fh):
         os.lseek(fh, offset, os.SEEK_SET)  # TODO make lazy

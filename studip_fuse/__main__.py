@@ -120,8 +120,8 @@ def main():
         os.makedirs(args.cache, exist_ok=True)
 
         logging.info("Handing over to FUSE driver")  # TODO offline support?
-        fuse_ops = FUSEView(rp)
-        FUSE(fuse_ops, args.mount, nothreads=True, foreground=True)
+        fuse_ops = FUSEView(rp, loop)
+        FUSE(fuse_ops, args.mount, foreground=True, allow_root=True, debug=args.debug)
     except:
         logging.error("FUSE driver interrupted", exc_info=True)
     finally:
