@@ -7,6 +7,8 @@ import asyncio
 import functools
 import os
 import sys
+import threading
+import traceback
 import warnings
 from getpass import getpass
 from threading import Thread
@@ -14,6 +16,7 @@ from threading import Thread
 import attr
 import sh
 from fuse import FUSE
+from more_itertools import one
 
 from studip_api.session import StudIPSession
 from studip_fuse.async_cache import schedule_task
@@ -134,15 +137,38 @@ def main():
         logging.info("Shutting down")
         loop.stop()
         logging.debug("Interrupted loop thread, waiting for join")
-        loop_thread.join(timeout=5)
-        while loop_thread.is_alive():  # FIXME hangs often # TODO clean shutdown
-            logging.warning("Waiting for loop thread interrupt...")
+        try:
             loop_thread.join(timeout=5)
-        logging.debug("Taking over event loop and draining")
-        loop.run_until_complete(shutdown_loop(loop, session))
-        logging.debug("Event loop drained, closing")
+            while loop_thread.is_alive():
+                logging.warning("Waiting for loop thread interrupt...")
+                dump_loop_stack(loop)
+                loop_thread.join(timeout=5)
+            logging.debug("Taking over event loop and draining")
+            loop.call_later(10, dump_loop_stack, loop)
+            try:
+                loop.run_until_complete(shutdown_loop(loop, session))
+                logging.debug("Event loop drained, closing")
+            except:
+                logging.warning("Event loop shut down with exception, closing", exc_info=True)
+        except KeyboardInterrupt:
+            logging.info("Clean shutdown interrupted, closing loop directly")
         loop.close()
         logging.info("Event loop closed")
+
+
+def dump_loop_stack(loop):
+    format_stack = lambda stack: "\n".join(traceback.format_stack(stack))
+    current_task = asyncio.Task.current_task(loop=loop)
+    pending_tasks = [t for t in asyncio.Task.all_tasks(loop=loop) if not t.done() and t is not current_task]
+    loop_thread = one(t for t in threading.enumerate() if t.ident == loop._thread_id)
+    logging.debug("Current task %s in loop %s parked in loop thread %s", current_task, loop, loop_thread)
+    if current_task:
+        logging.debug("Task stack trace:\n %s", format_stack(current_task.get_stack()))
+    logging.debug("Thread stack trace:\n %s", format_stack(sys._current_frames()[loop_thread.ident]))
+    pending_tasks_str = "\n".join(
+        str(t) + "\n" + format_stack(t.get_stack())
+        for t in pending_tasks)
+    logging.debug("%s further pending tasks:\n %s", len(pending_tasks), pending_tasks_str)
 
 
 if __name__ == "__main__":
