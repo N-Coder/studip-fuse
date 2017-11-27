@@ -1,5 +1,4 @@
 import logging
-from getpass import getpass
 
 logging.basicConfig(level=logging.INFO)
 
@@ -8,8 +7,9 @@ import asyncio
 import functools
 import os
 import sys
-from threading import Thread
 import warnings
+from getpass import getpass
+from threading import Thread
 
 import attr
 import sh
@@ -18,8 +18,8 @@ from fuse import FUSE
 from studip_api.session import StudIPSession
 from studip_fuse.async_cache import schedule_task
 from studip_fuse.fs_driver import FUSEView
-from studip_fuse.virtual_path import VirtualPath
 from studip_fuse.real_path import RealPath
+from studip_fuse.virtual_path import VirtualPath
 
 
 @attr.s(hash=False)
@@ -49,7 +49,7 @@ class CachedStudIPSession(StudIPSession):
     @functools.lru_cache()
     @schedule_task()
     async def download_file_contents(self, file, dest=None, chunk_size=1024 * 256):
-        # TODO check integrity of existing paths and reuse them
+        # TODO check integrity of existing paths (file with id exists, same size, same change date) and reuse them
         if not dest:
             dest = os.path.join(self.cache_dir, file.id)
         return await super().download_file_contents(file, dest)
@@ -73,7 +73,7 @@ def main():
     parser.add_argument('--format', help='path format',
                         default="{semester-lexical-short}/{course}/{type}/{short-path}/{name}")
     parser.add_argument('--mount', help='mount path', default=mkpath("~/studip/mount"))
-    parser.add_argument('--cache', help='cache oath', default=mkpath("~/studip/cache"))
+    parser.add_argument('--cache', help='cache oath', default=mkpath("~/studip/cache"))  # TODO use XDG_CACHE_DIR
     parser.add_argument('--studip', help='Stud.IP base URL', default="https://studip.uni-passau.de")
     parser.add_argument('--sso', help='SSO base URL', default="https://sso.uni-passau.de")
     parser.add_argument('--debug', help='enable debug mode', action='store_true')
@@ -135,7 +135,7 @@ def main():
         loop.stop()
         logging.debug("Interrupted loop thread, waiting for join")
         loop_thread.join(timeout=5)
-        while loop_thread.is_alive():
+        while loop_thread.is_alive():  # FIXME hangs often # TODO clean shutdown
             logging.warning("Waiting for loop thread interrupt...")
             loop_thread.join(timeout=5)
         logging.debug("Taking over event loop and draining")
