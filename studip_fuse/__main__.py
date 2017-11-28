@@ -46,6 +46,13 @@ def main():
         logging.info("FUSE driver stopped, also stopping event loop")
         loop.stop()
 
+        if args.debug:
+            # print loop stack trace until the loop thread completed
+            loop_thread.join(10)
+            while loop_thread.is_alive():
+                dump_loop_stack(loop)
+                loop_thread.join(5)
+
 
 def parse_args():
     from studip_fuse import __version__ as prog_version
@@ -74,40 +81,48 @@ def run_loop(args, future: concurrent.futures.Future):
         asyncio.set_event_loop(loop)
         if args.debug:
             loop.set_debug(True)
-
-        logging.info("Opening StudIP session")
-        if args.pwfile == "-":
-            password = getpass()
-        else:
-            with open(args.pwfile) as f:
-                password = f.read()
-        coro = CachedStudIPSession(
-            user_name=args.user, password=password.strip(),
-            studip_base=args.studip, sso_base=args.sso,
-            cache_dir=args.cache
-        ).__aenter__()
-        password = ""
-        session = loop.run_until_complete(coro)
-
-        logging.debug("Loop and session ready, sending result back to main thread")
-        future.set_result((loop, session))
     except Exception as e:
-        logging.debug("Loop and session initialization failed, propagating result back to main thread")
+        logging.debug("Loop initialization failed, propagating result back to main thread")
         future.set_exception(e)
         raise
 
     try:
-        logging.info("Running asyncio event loop...")
-        loop.run_forever()
-    finally:
-        logging.info("asyncio event loop stopped, cleaning up")
         try:
-            loop.run_until_complete(shutdown_loop_async(loop, session))
-            logging.info("Cleaned up, closing event loop")
-        except:
-            logging.warning("Clean-up failed, closing", exc_info=True)
+            logging.info("Opening StudIP session")
+            if args.pwfile == "-":
+                password = getpass()
+            else:
+                with open(args.pwfile) as f:
+                    password = f.read()
+            coro = CachedStudIPSession(
+                user_name=args.user, password=password.strip(),
+                studip_base=args.studip, sso_base=args.sso,
+                cache_dir=args.cache
+            ).__aenter__()
+            password = ""
+            session = loop.run_until_complete(coro)
+        except Exception as e:
+            logging.debug("Session initialization failed, propagating result back to main thread")
+            future.set_exception(e)
+            raise
+
+        logging.debug("Loop and session ready, sending result back to main thread")
+        future.set_result((loop, session))
+
+        try:
+            logging.info("Running asyncio event loop...")
+            loop.run_forever()
+        finally:
+            logging.info("asyncio event loop stopped, cleaning up")
+            try:
+                loop.run_until_complete(shutdown_loop_async(loop, session))
+                logging.info("Cleaned up, closing event loop")
+            except:
+                logging.warning("Clean-up failed, closing", exc_info=True)
+
+    finally:
         loop.close()
-        logging.info("Event loop closed, good-bye")
+        logging.info("Event loop closed, shutdown complete")
 
 
 async def shutdown_loop_async(loop, session):
@@ -134,11 +149,12 @@ def run_fuse(loop, session, args):
     os.makedirs(args.mount, exist_ok=True)
     os.makedirs(args.cache, exist_ok=True)
 
-    logging.info("Initialization done, handing over to FUSE driver")  # TODO offline support?
+    logging.debug("Initialization done, handing over to FUSE driver")
     if args.debug:
         fuse_ops = LoggingFUSEView(rp, loop)
     else:
         fuse_ops = FUSEView(rp, loop)
+    logging.info("Ready")
     FUSE(fuse_ops, args.mount, foreground=True, allow_root=args.allowroot, debug=args.debug)
 
 
