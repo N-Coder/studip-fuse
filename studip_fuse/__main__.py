@@ -156,19 +156,22 @@ def main():
         logging.info("Event loop closed")
 
 
+thread_log = logging.getLogger("threads")
+
+
 def dump_loop_stack(loop):
-    format_stack = lambda stack: "\n".join(traceback.format_stack(stack))
+    format_stack = lambda stack: "".join(traceback.format_stack(stack[0] if isinstance(stack, list) else stack))
     current_task = asyncio.Task.current_task(loop=loop)
     pending_tasks = [t for t in asyncio.Task.all_tasks(loop=loop) if not t.done() and t is not current_task]
     loop_thread = one(t for t in threading.enumerate() if t.ident == loop._thread_id)
-    logging.debug("Current task %s in loop %s parked in loop thread %s", current_task, loop, loop_thread)
+    thread_log.debug("Current task %s in loop %s in loop thread %s", current_task, loop, loop_thread)
     if current_task:
-        logging.debug("Task stack trace:\n %s", format_stack(current_task.get_stack()))
-    logging.debug("Thread stack trace:\n %s", format_stack(sys._current_frames()[loop_thread.ident]))
+        thread_log.debug("Task stack trace:\n %s", format_stack(current_task.get_stack()))
+    thread_log.debug("Thread stack trace:\n %s", format_stack(sys._current_frames()[loop_thread.ident]))
     pending_tasks_str = "\n".join(
         str(t) + "\n" + format_stack(t.get_stack())
         for t in pending_tasks)
-    logging.debug("%s further pending tasks:\n %s", len(pending_tasks), pending_tasks_str)
+    thread_log.debug("%s further pending tasks:\n %s", len(pending_tasks), pending_tasks_str)
 
 
 if __name__ == "__main__":
