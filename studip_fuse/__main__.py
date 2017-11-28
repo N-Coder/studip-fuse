@@ -1,10 +1,8 @@
-import logging
-
-logging.basicConfig(level=logging.INFO)
-
 import argparse as argparse
 import asyncio
+import concurrent.futures
 import functools
+import logging
 import os
 import sys
 import threading
@@ -13,62 +11,44 @@ import warnings
 from getpass import getpass
 from threading import Thread
 
-import attr
 import sh
 from fuse import FUSE
 from more_itertools import one
 
-from studip_api.session import StudIPSession
-from studip_fuse.async_cache import schedule_task
-from studip_fuse.fs_driver import FUSEView
+from studip_fuse.cached_session import CachedStudIPSession
+from studip_fuse.fs_driver import FUSEView, LoggingFUSEView
 from studip_fuse.real_path import RealPath
 from studip_fuse.virtual_path import VirtualPath
 
-
-@attr.s(hash=False)
-class CachedStudIPSession(StudIPSession):
-    cache_dir: str = attr.ib()
-
-    @functools.lru_cache()
-    @schedule_task()
-    async def get_semesters(self):
-        return await super().get_semesters()
-
-    @functools.lru_cache()
-    @schedule_task()
-    async def get_courses(self, semester):
-        return await super().get_courses(semester)
-
-    @functools.lru_cache()
-    @schedule_task()
-    async def get_course_files(self, course):
-        return await super().get_course_files(course)
-
-    @functools.lru_cache()
-    @schedule_task()
-    async def get_folder_files(self, folder):
-        return await super().get_folder_files(folder)
-
-    @functools.lru_cache()
-    @schedule_task()
-    async def download_file_contents(self, file, dest=None, chunk_size=1024 * 256):
-        # TODO check integrity of existing paths (file with id exists, same size, same change date) and reuse them
-        if not dest:
-            dest = os.path.join(self.cache_dir, file.id)
-        return await super().download_file_contents(file, dest)
-
-
-async def shutdown_loop(loop, session):
-    await session.__aexit__(*sys.exc_info())
-    logging.debug("Session closed")
-    await asyncio.sleep(1)
-    await loop.shutdown_asyncgens()
-    logging.debug("Loop drained")
+logging.basicConfig(level=logging.INFO)
+thread_log = logging.getLogger("threads")
 
 
 def main():
-    from studip_fuse import __version__ as prog_version
+    args = parse_args()
+    if args.debug:
+        logging.root.setLevel(logging.DEBUG)
+        warnings.resetwarnings()
+    else:
+        logging.getLogger("sh").setLevel(logging.WARNING)
+        logging.getLogger("asyncio").setLevel(logging.WARNING)
 
+    future = concurrent.futures.Future()
+    loop_thread = Thread(target=functools.partial(run_loop, args, future), name="aio event loop")
+    loop_thread.start()
+    logging.debug("Loop thread started, waiting for session initialization")
+    loop, session = future.result()
+    try:
+        run_fuse(loop, session, args)
+    except:
+        logging.error("FUSE driver crashed", exc_info=True)
+    finally:
+        logging.info("FUSE driver stopped, also stopping event loop")
+        loop.stop()
+
+
+def parse_args():
+    from studip_fuse import __version__ as prog_version
     mkpath = lambda p: os.path.realpath(os.path.expanduser(p))
     parser = argparse.ArgumentParser(description='Stud.IP Fuse')
     parser.add_argument('--user', help='username', required=True)
@@ -84,79 +64,82 @@ def main():
                         action='store_true')
     parser.add_argument('--version', action='version', version="%(prog)s " + prog_version)
     args = parser.parse_args()
+    return args
 
-    loop = asyncio.get_event_loop()
 
-    if args.debug:
-        loop.set_debug(True)
-        logging.root.setLevel(logging.DEBUG)
-        warnings.resetwarnings()
-    else:
-        logging.getLogger("sh").setLevel(logging.WARNING)
+def run_loop(args, future: concurrent.futures.Future):
+    try:
+        logging.info("Initializing asyncio event loop...")
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        if args.debug:
+            loop.set_debug(True)
 
-    loop_thread = Thread(target=loop.run_forever, name="aio event loop")
-    loop_thread.start()
+        logging.info("Opening StudIP session")
+        if args.pwfile == "-":
+            password = getpass()
+        else:
+            with open(args.pwfile) as f:
+                password = f.read()
+        coro = CachedStudIPSession(
+            user_name=args.user, password=password.strip(),
+            studip_base=args.studip, sso_base=args.sso,
+            cache_dir=args.cache
+        ).__aenter__()
+        password = ""
+        session = loop.run_until_complete(coro)
 
-    logging.info("Opening StudIP session")
-    if args.pwfile == "-":
-        password = getpass()
-    else:
-        with open(args.pwfile) as f:
-            password = f.read()
-    session = asyncio.run_coroutine_threadsafe(CachedStudIPSession(
-        user_name=args.user,
-        password=password.strip(),
-        studip_base=args.studip,
-        sso_base=args.sso,
-        cache_dir=args.cache
-    ).__aenter__(), loop).result()
-    password = ""
+        logging.debug("Loop and session ready, sending result back to main thread")
+        future.set_result((loop, session))
+    except Exception as e:
+        logging.debug("Loop and session initialization failed, propagating result back to main thread")
+        future.set_exception(e)
+        raise
 
     try:
-        logging.info("Initializing virtual file system")
-        vp = VirtualPath(session=session, path_segments=[], known_data={}, parent=None,
-                         next_path_segments=args.format.split("/"))
-        rp = RealPath(parent=None, generating_vps={vp})
-
-        try:
-            sh.fusermount("-u", args.mount)
-        except sh.ErrorReturnCode as e:
-            if "entry for" not in str(e) or "not found in" not in str(e):
-                logging.warning("Could not unmount mount path %s", args.mount, exc_info=True)
-            else:
-                logging.debug(e.stderr.decode("UTF-8", "replace").strip().split("\n")[-1])
-        os.makedirs(args.mount, exist_ok=True)
-        os.makedirs(args.cache, exist_ok=True)
-
-        logging.info("Handing over to FUSE driver")  # TODO offline support?
-        fuse_ops = FUSEView(rp, loop)
-        FUSE(fuse_ops, args.mount, foreground=True, allow_root=args.allowroot, debug=args.debug)
-    except:
-        logging.error("FUSE driver interrupted", exc_info=True)
+        logging.info("Running asyncio event loop...")
+        loop.run_forever()
     finally:
-        logging.info("Shutting down")
-        loop.stop()
-        logging.debug("Interrupted loop thread, waiting for join")
+        logging.info("asyncio event loop stopped, cleaning up")
         try:
-            loop_thread.join(timeout=5)
-            while loop_thread.is_alive():
-                logging.warning("Waiting for loop thread interrupt...")
-                dump_loop_stack(loop)
-                loop_thread.join(timeout=5)
-            logging.debug("Taking over event loop and draining")
-            loop.call_later(10, dump_loop_stack, loop)
-            try:
-                loop.run_until_complete(shutdown_loop(loop, session))
-                logging.debug("Event loop drained, closing")
-            except:
-                logging.warning("Event loop shut down with exception, closing", exc_info=True)
-        except KeyboardInterrupt:
-            logging.info("Clean shutdown interrupted, closing loop directly")
+            loop.run_until_complete(shutdown_loop_async(loop, session))
+            logging.info("Cleaned up, closing event loop")
+        except:
+            logging.warning("Clean-up failed, closing", exc_info=True)
         loop.close()
-        logging.info("Event loop closed")
+        logging.info("Event loop closed, good-bye")
 
 
-thread_log = logging.getLogger("threads")
+async def shutdown_loop_async(loop, session):
+    await session.__aexit__(*sys.exc_info())
+    logging.debug("Session closed")
+    await asyncio.sleep(1)
+    await loop.shutdown_asyncgens()
+    logging.debug("Loop drained")
+
+
+def run_fuse(loop, session, args):
+    logging.info("Initializing virtual file system")
+    vp = VirtualPath(session=session, path_segments=[], known_data={}, parent=None,
+                     next_path_segments=args.format.split("/"))
+    rp = RealPath(parent=None, generating_vps={vp})
+
+    try:
+        sh.fusermount("-u", args.mount)
+    except sh.ErrorReturnCode as e:
+        if "entry for" not in str(e) or "not found in" not in str(e):
+            logging.warning("Could not unmount mount path %s", args.mount, exc_info=True)
+        else:
+            logging.debug(e.stderr.decode("UTF-8", "replace").strip().split("\n")[-1])
+    os.makedirs(args.mount, exist_ok=True)
+    os.makedirs(args.cache, exist_ok=True)
+
+    logging.info("Initialization done, handing over to FUSE driver")  # TODO offline support?
+    if args.debug:
+        fuse_ops = LoggingFUSEView(rp, loop)
+    else:
+        fuse_ops = FUSEView(rp, loop)
+    FUSE(fuse_ops, args.mount, foreground=True, allow_root=args.allowroot, debug=args.debug)
 
 
 def dump_loop_stack(loop):

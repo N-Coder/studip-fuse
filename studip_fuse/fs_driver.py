@@ -6,7 +6,7 @@ import os
 from typing import List
 
 import attr
-from fuse import Operations
+from fuse import LoggingMixIn, Operations
 
 from studip_fuse.path_util import path_name
 from studip_fuse.real_path import RealPath
@@ -69,3 +69,8 @@ class FUSEView(Operations):
 
     def fsync(self, path, fdatasync, fh):
         return self.flush(path, fh)
+
+
+@attr.s(frozen=True)
+class LoggingFUSEView(FUSEView, LoggingMixIn):
+    pass
