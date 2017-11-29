@@ -35,24 +35,36 @@ def main():
         logging.getLogger("asyncio").setLevel(logging.WARNING)
 
     future = concurrent.futures.Future()
-    loop_thread = Thread(target=functools.partial(run_loop, args, future), name="aio event loop")
+    loop_thread = Thread(target=functools.partial(run_loop, args, future), name="aio event loop", daemon=True)
     loop_thread.start()
-    logging.debug("Loop thread started, waiting for session initialization")
-    loop, session = future.result()
+    loop, session = None, None
     try:
+        logging.debug("Loop thread started, waiting for session initialization")
+        loop, session = future.result()
+
         run_fuse(loop, session, args)
     except:
         logging.error("FUSE driver crashed", exc_info=True)
     finally:
         logging.info("FUSE driver stopped, also stopping event loop")
-        loop.stop()
+        future.cancel()
+        if loop:
+            loop.stop()
 
-        if args.debug:
-            # print loop stack trace until the loop thread completed
-            loop_thread.join(10)
-            while loop_thread.is_alive():
-                dump_loop_stack(loop)
-                loop_thread.join(5)
+        # print loop stack trace until the loop thread completed
+        counter = 0
+        while loop_thread.is_alive() and counter < 6:
+            loop_thread.join(5)
+            counter += 1
+            if loop_thread.is_alive():
+                if loop:
+                    dump_loop_stack(loop)
+                else:
+                    thread_log.info("Waiting for loop thread to abort initialization...")
+                    thread_log.debug("Thread stack trace:\n %s", format_stack(sys._current_frames()[loop_thread.ident]))
+
+        if loop_thread.is_alive():
+            logging.warning("Shutting down main thread and thus killing hung event loop daemon thread")
 
 
 def parse_args():
@@ -87,6 +99,8 @@ def run_loop(args, future: concurrent.futures.Future):
         logging.debug("Loop initialization failed, propagating result back to main thread")
         future.set_exception(e)
         raise
+    if future.cancelled():
+        return
 
     try:
         try:
@@ -108,11 +122,17 @@ def run_loop(args, future: concurrent.futures.Future):
                 cache_dir=args.cache
             ).__aenter__()
             password = ""
-            session = loop.run_until_complete(coro)
+            task = asyncio.ensure_future(coro, loop=loop)
+            future.add_done_callback(lambda f: task.cancel() if f.cancelled() else None)
+            if future.cancelled():
+                return
+            session = loop.run_until_complete(task)
         except Exception as e:
             logging.debug("Session initialization failed, propagating result back to main thread")
             future.set_exception(e)
             raise
+        if future.cancelled():
+            return
 
         logging.debug("Loop and session ready, sending result back to main thread")
         future.set_result((loop, session))
@@ -172,18 +192,33 @@ def run_fuse(loop, session, args):
 
 
 def dump_loop_stack(loop):
-    format_stack = lambda stack: "".join(traceback.format_stack(stack[0] if isinstance(stack, list) else stack))
     current_task = asyncio.Task.current_task(loop=loop)
     pending_tasks = [t for t in asyncio.Task.all_tasks(loop=loop) if not t.done() and t is not current_task]
     loop_thread = one(t for t in threading.enumerate() if t.ident == loop._thread_id)
-    thread_log.debug("Current task %s in loop %s in loop thread %s", current_task, loop, loop_thread)
-    if current_task:
-        thread_log.debug("Task stack trace:\n %s", format_stack(current_task.get_stack()))
-    thread_log.debug("Thread stack trace:\n %s", format_stack(sys._current_frames()[loop_thread.ident]))
-    pending_tasks_str = "\n".join(
-        str(t) + "\n" + format_stack(t.get_stack())
-        for t in pending_tasks)
-    thread_log.debug("%s further pending tasks:\n %s", len(pending_tasks), pending_tasks_str)
+    loop_thread_stack = sys._current_frames()[loop_thread.ident]
+    loop_thread_stack_trace = format_stack(loop_thread_stack)
+
+    if thread_log.isEnabledFor(logging.DEBUG):
+        thread_log.debug("Current task %s in loop %s in loop thread %s", current_task, loop, loop_thread)
+        if current_task:
+            thread_log.debug("Task stack trace:\n %s", format_stack(current_task.get_stack()))
+        thread_log.debug("Thread stack trace:\n %s", loop_thread_stack_trace)
+        pending_tasks_str = "\n".join(
+            str(t) + "\n" + format_stack(t.get_stack())
+            for t in pending_tasks)
+        thread_log.debug("%s further pending tasks:\n %s", len(pending_tasks), pending_tasks_str)
+    else:
+        thread_log.info("Waiting for event loop to stop... (%s further pending tasks after current task %s "
+                        "in loop %s in loop thread %s)", len(pending_tasks), current_task, loop, loop_thread)
+
+    if len(pending_tasks) == 0 and current_task is None \
+            and "epoll.poll(timeout, max_ev)" in loop_thread_stack_trace.strip().split("\n")[-1]:
+        thread_log.warning("Event loop hangs in epoll selector without any tasks pending. "
+                           "This is probably a python bug (https://bugs.python.org/issue29780).")
+
+
+def format_stack(stack):
+    return "".join(traceback.format_stack(stack[0] if isinstance(stack, list) else stack))
 
 
 if __name__ == "__main__":
