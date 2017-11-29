@@ -1,5 +1,6 @@
 import functools
 import os
+import time
 
 import attr
 
@@ -34,7 +35,14 @@ class CachedStudIPSession(StudIPSession):
     @functools.lru_cache()
     @schedule_task()
     async def download_file_contents(self, file, dest=None, chunk_size=1024 * 256):
-        # TODO check integrity of existing paths (file with id exists, same size, same change date) and reuse them
         if not dest:
             dest = os.path.join(self.cache_dir, file.id)
+
+        # check integrity of existing paths (file with id exists, same size, same change date) and reuse them
+        if os.path.isfile(dest):
+            timestamp = time.mktime(file.changed.timetuple())
+            stat = os.stat(dest)
+            if stat.st_size == file.size and stat.st_mtime == timestamp:
+                return dest
+
         return await super().download_file_contents(file, dest)
