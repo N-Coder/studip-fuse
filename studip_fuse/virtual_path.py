@@ -201,8 +201,12 @@ class VirtualPath(object):
 
         if self._file:
             path = short_path = self._file.path[1:-1]  # '1234VL-Name'/[path]/'file_name'
-            if short_path[0:1] == ["Allgemeiner Dateiordner"]:
-                # TODO only skip if "Allgemeiner Dateiordner" is only object in course root dir / has no siblings
+
+            # skip "Allgemeiner Dateiordner" if it is the only object in course root dir / has no siblings
+            root_file = self._file
+            while root_file.parent and root_file.parent.parent:
+                root_file = root_file.parent
+            if root_file.name in ["Allgemeiner Dateiordner", "Hauptordner"] and root_file.is_single_child:
                 short_path = path_tail(short_path)
 
             tokens.update({
