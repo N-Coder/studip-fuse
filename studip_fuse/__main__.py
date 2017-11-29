@@ -11,6 +11,7 @@ import warnings
 from getpass import getpass
 from threading import Thread
 
+import appdirs
 import sh
 from fuse import FUSE
 from more_itertools import one
@@ -55,19 +56,20 @@ def main():
 
 
 def parse_args():
-    from studip_fuse import __version__ as prog_version
-    mkpath = lambda p: os.path.realpath(os.path.expanduser(p))
-    parser = argparse.ArgumentParser(description='Stud.IP Fuse')
+    from studip_fuse import __version__ as prog_version, __author__ as prog_author
+    dirs = appdirs.AppDirs("Stud.IP-Fuse", prog_author)
+    parser = argparse.ArgumentParser(description='Stud.IP Fuse', formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     parser.add_argument('--user', help='username', required=True)
-    parser.add_argument('--pwfile', help='password file', default=mkpath('~/.studip-pw'))
-    parser.add_argument('--format', help='path format',
+    parser.add_argument('--pwfile', help='path to password file or "-" to read from stdin',
+                        default=os.path.join(dirs.user_config_dir, '.studip-pw'))
+    parser.add_argument('--format', help='format specifier for virtual paths',
                         default="{semester-lexical-short}/{course}/{type}/{short-path}/{name}")
-    parser.add_argument('--mount', help='mount path', default=mkpath("~/studip/mount"))
-    parser.add_argument('--cache', help='cache oath', default=mkpath("~/studip/cache"))  # TODO use XDG_CACHE_DIR
+    parser.add_argument('--mount', help='path to mount point', default=os.path.join(dirs.user_data_dir, 'mount'))
+    parser.add_argument('--cache', help='path to cache directory', default=dirs.user_cache_dir)
     parser.add_argument('--studip', help='Stud.IP base URL', default="https://studip.uni-passau.de")
     parser.add_argument('--sso', help='SSO base URL', default="https://sso.uni-passau.de")
     parser.add_argument('--debug', help='enable debug mode', action='store_true')
-    parser.add_argument('--allowroot', help='allow root to access the mounted directory (required for overlayFS)',
+    parser.add_argument('--allowroot', help='allow root to access the mounted directory',
                         action='store_true')
     parser.add_argument('--version', action='version', version="%(prog)s " + prog_version)
     args = parser.parse_args()
@@ -92,8 +94,14 @@ def run_loop(args, future: concurrent.futures.Future):
             if args.pwfile == "-":
                 password = getpass()
             else:
-                with open(args.pwfile) as f:
-                    password = f.read()
+                try:
+                    with open(args.pwfile) as f:
+                        password = f.read()
+                except FileNotFoundError as e:
+                    logging.warning("%s. Either specifiy a file from which your Stud.IP password can be read "
+                                    "or use `--pwfile -` to enter it using a promt in the shell." % e)
+                    future.set_exception(e)
+                    return
             coro = CachedStudIPSession(
                 user_name=args.user, password=password.strip(),
                 studip_base=args.studip, sso_base=args.sso,
@@ -121,6 +129,8 @@ def run_loop(args, future: concurrent.futures.Future):
                 logging.warning("Clean-up failed, closing", exc_info=True)
 
     finally:
+        if not future.done():
+            logging.warning("Event loop thread did not report result back to main thread, will probably hang.")
         loop.close()
         logging.info("Event loop closed, shutdown complete")
 
@@ -139,6 +149,11 @@ def run_fuse(loop, session, args):
                      next_path_segments=args.format.split("/"))
     rp = RealPath(parent=None, generating_vps={vp})
 
+    os.makedirs(args.cache, exist_ok=True)
+    try:
+        os.makedirs(args.mount, exist_ok=True)
+    except FileExistsError:  # if mountpoint was not unmounted properly
+        pass
     try:
         sh.fusermount("-u", args.mount)
     except sh.ErrorReturnCode as e:
@@ -146,8 +161,6 @@ def run_fuse(loop, session, args):
             logging.warning("Could not unmount mount path %s", args.mount, exc_info=True)
         else:
             logging.debug(e.stderr.decode("UTF-8", "replace").strip().split("\n")[-1])
-    os.makedirs(args.mount, exist_ok=True)
-    os.makedirs(args.cache, exist_ok=True)
 
     logging.debug("Initialization done, handing over to FUSE driver")
     if args.debug:
