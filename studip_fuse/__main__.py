@@ -14,7 +14,7 @@ from threading import Thread
 import appdirs
 import sh
 from fuse import FUSE
-from more_itertools import one
+from more_itertools import flatten, one
 
 from studip_fuse.cached_session import CachedStudIPSession
 from studip_fuse.fs_driver import FUSEView, LoggingFUSEView
@@ -67,16 +67,29 @@ def main():
             logging.warning("Shutting down main thread and thus killing hung event loop daemon thread")
 
 
+class StoreNameValuePair(argparse.Action):
+    def __call__(self, parser, namespace, values, option_string=None):
+        values = flatten(v.split(',') for v in values)
+        for value in values:
+            if '=' in value:
+                n, v = value.split('=')
+                setattr(namespace, n, v)
+            elif value.startswith("no"):
+                setattr(namespace, value[2:], False)
+            else:
+                setattr(namespace, value, True)
+
+
 def parse_args():
     from studip_fuse import __version__ as prog_version, __author__ as prog_author
     dirs = appdirs.AppDirs("Stud.IP-Fuse", prog_author)
     parser = argparse.ArgumentParser(description='Stud.IP Fuse', formatter_class=argparse.ArgumentDefaultsHelpFormatter)
-    parser.add_argument('--user', help='username', required=True)
+    parser.add_argument('user', help='Stud.IP username')
+    parser.add_argument('mount', help='path to mount point')
     parser.add_argument('--pwfile', help='path to password file or "-" to read from stdin',
                         default=os.path.join(dirs.user_config_dir, '.studip-pw'))
     parser.add_argument('--format', help='format specifier for virtual paths',
                         default="{semester-lexical-short}/{course}/{type}/{short-path}/{name}")
-    parser.add_argument('--mount', help='path to mount point', default=os.path.join(dirs.user_data_dir, 'mount'))
     parser.add_argument('--cache', help='path to cache directory', default=dirs.user_cache_dir)
     parser.add_argument('--studip', help='Stud.IP base URL', default="https://studip.uni-passau.de")
     parser.add_argument('--sso', help='SSO base URL', default="https://sso.uni-passau.de")
@@ -84,6 +97,7 @@ def parse_args():
     parser.add_argument('--allowroot', help='allow root to access the mounted directory',
                         action='store_true')
     parser.add_argument('--version', action='version', version="%(prog)s " + prog_version)
+    parser.add_argument('-o', help='FUSE-like options', nargs='+', action=StoreNameValuePair)
     args = parser.parse_args()
     return args
 
