@@ -25,7 +25,7 @@ def StoreNameValuePair(option_parser):
                 else:
                     option_parser.parse_args(["--" + value], namespace)
             if ignored_values:
-                logging.warning("Ignoring arguments %s" % ", ".join(ignored_values))
+                logging.debug("Ignoring arguments %s" % ", ".join(ignored_values))
 
     return anonymous_class
 
@@ -49,6 +49,7 @@ def parse_args():
 
     fuse_opts = opts_parser.add_argument_group("FUSE Options")
     fuse_opts.add_argument("--foreground", help="run in foreground", action="store_true")
+    fuse_opts.add_argument("--nothreads", help="single threads for FUSE", action="store_true")
     fuse_opts.add_argument("--allow_other", help="allow access by all users", action="store_true")
     fuse_opts.add_argument("--allow_root", help="allow access by root", action="store_true")
     fuse_opts.add_argument("--nonempty", help="allow mounts over non-empty file/dir", action="store_true")

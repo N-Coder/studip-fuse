@@ -7,6 +7,9 @@ async_cache_log = logging.getLogger("studip_fuse.async_cache")
 call_counter = 0
 
 
+# TODO refactor multi-level caching (esp. in FUSEView), add ttl / SIGUSR-based clearing
+# TODO discard failed Tasks => retry on connection failure
+# TODO check Handling of exceptions
 def schedule_task(schedule_with=asyncio.ensure_future):
     def wrapper(func):
         async_cache_log.debug("Scheduling future execution of coroutine / result of calling %s with %s",

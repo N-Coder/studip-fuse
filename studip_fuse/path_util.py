@@ -102,5 +102,6 @@ def get_format_segment_requires(format_segment) -> Set[Type]:
     if any(t in format_segment for t in ["{path}", "{short-path}", "{id}", "{name}", "{description}", "{author}"]):
         requirements.add(File)
     if "{time}" in format_segment and not requirements:  # any info can provide a time
+        # TODO time may differ between file and parent folder, which will break path logic
         requirements.add(Semester)
     return requirements

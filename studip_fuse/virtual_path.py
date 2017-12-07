@@ -178,7 +178,7 @@ class VirtualPath(object):
 
     @cached_property
     def _known_tokens(self):
-        tokens = {
+        tokens = {  # TODO time may differ between file and parent folder, which will break path logic
             "created": self.mod_times[0],
             "changed": self.mod_times[1],
         }
