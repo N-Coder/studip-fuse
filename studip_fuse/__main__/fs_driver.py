@@ -8,8 +8,7 @@ from typing import List
 import attr
 from fuse import LoggingMixIn, Operations
 
-from studip_fuse.path_util import path_name
-from studip_fuse.real_path import RealPath
+from studip_fuse.path import RealPath, path_name
 
 log = logging.getLogger("studip_fuse.fs_drive")
 

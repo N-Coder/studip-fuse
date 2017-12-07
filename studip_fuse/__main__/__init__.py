@@ -11,11 +11,10 @@ from threading import Thread
 import sh
 from fuse import FUSE, fuse_get_context
 
-from studip_fuse.cached_session import CachedStudIPSession
-from studip_fuse.cmd_util import dump_loop_stack, format_stack, parse_args, thread_log
-from studip_fuse.fs_driver import FUSEView, LoggingFUSEView
-from studip_fuse.real_path import RealPath
-from studip_fuse.virtual_path import VirtualPath
+from studip_fuse.__main__.cmd_util import dump_loop_stack, format_stack, parse_args, thread_log
+from studip_fuse.__main__.fs_driver import FUSEView, LoggingFUSEView
+from studip_fuse.cache import CachedStudIPSession
+from studip_fuse.path import RealPath, VirtualPath
 
 logging.basicConfig(level=logging.INFO)
 

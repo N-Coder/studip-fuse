@@ -5,6 +5,9 @@ from typing import Set, Type
 
 from studip_api.model import Course, File, Semester
 
+__all__ = ["EscapeMode", "Charset", "escape_file_name", "normalize_path", "path_head", "path_tail", "path_parent",
+           "path_name", "get_format_segment_requires"]
+
 PUNCTUATION_WHITESPACE_RE = re.compile(r"[ _/.,;:\-_#'+*~!^\"$%&/()[\]}{\\?<>|]+")
 NON_ASCII_RE = re.compile(r"[^\x00-\x7f]+")
 NON_IDENTIFIER_RE = re.compile(r"[^A-Za-z0-9_]+")

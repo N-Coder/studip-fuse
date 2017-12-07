@@ -12,9 +12,9 @@ from cached_property import cached_property
 
 from studip_api.model import Course, File, Folder, Semester
 from studip_api.session import StudIPSession
-from studip_fuse.async_cache import schedule_task
-from studip_fuse.path_util import Charset, EscapeMode, escape_file_name, get_format_segment_requires, normalize_path, \
-    path_head, path_tail
+from studip_fuse.cache import schedule_task
+from studip_fuse.path.path_util import Charset, EscapeMode, escape_file_name, get_format_segment_requires, \
+    normalize_path, path_head, path_tail
 
 log = logging.getLogger("studip_fuse.virtual_path")
 

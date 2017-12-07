@@ -7,9 +7,9 @@ import attr
 from cached_property import cached_property
 from more_itertools import one, unique_everseen
 
-from studip_fuse.async_cache import schedule_task
-from studip_fuse.path_util import normalize_path, path_head, path_name, path_tail
-from studip_fuse.virtual_path import VirtualPath
+from studip_fuse.cache import schedule_task
+from studip_fuse.path.path_util import normalize_path, path_head, path_name, path_tail
+from studip_fuse.path.virtual_path import VirtualPath
 
 log = logging.getLogger("studip_fuse.real_path")
 iter_log = log.getChild("resolve")

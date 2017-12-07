@@ -5,7 +5,7 @@ import time
 import attr
 
 from studip_api.session import StudIPSession
-from studip_fuse.async_cache import schedule_task
+from studip_fuse.cache import schedule_task
 
 
 @attr.s(hash=False)
