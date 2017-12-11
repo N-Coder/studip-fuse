@@ -3,7 +3,7 @@
 import os
 import re
 
-from setuptools import setup
+from setuptools import find_packages, setup
 
 if __name__ == "__main__":
     os.chdir(os.path.dirname(os.path.realpath(__file__)))
@@ -16,14 +16,17 @@ if __name__ == "__main__":
 
     setup(
         name="studip-fuse",
-        packages=["studip_fuse"],
-        include_package_data=True,
+        packages=find_packages(),
+        package_data={
+            'studip_fuse': ['__main__/logging.yaml'],
+        },
         install_requires=[
             "studip-api=="+version,
             "fusepy",
             "argparse",
             "appdirs",
-            "sh"
+            "sh",
+            "pyyaml"
         ],
         entry_points={
             "console_scripts": ["studip-fuse = studip_fuse.__main__:main"]
@@ -31,6 +34,7 @@ if __name__ == "__main__":
         version=version,
         description="Python FUSE drive for courses and files available through the Stud.IP University Access Portal",
         long_description=long_descr,
+        # TODO add logging.yaml
         author="Simon Fink",
         url="https://github.com/N-Coder/studip-fuse"
     )

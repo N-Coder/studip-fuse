@@ -1,0 +1,38 @@
+version: 1
+
+formatters:
+  syslog:
+    format: '%(name)s: %(message)s'
+  simple:
+    format: '%(process)s %(asctime)s %(levelname).1s %(name)-25.25s - %(message)s'
+  console:
+    format: '%(message)s'
+
+handlers:
+  syslog:
+    class: logging.handlers.SysLogHandler
+    address: /dev/log
+    formatter: syslog
+
+  file:
+    class: logging.handlers.WatchedFileHandler
+    filename: /tmp/studip_fuse.log
+    formatter: simple
+
+  console:
+    class: logging.StreamHandler
+    stream: ext://sys.stdout
+    formatter: console
+
+loggers:
+  studip_fuse.async_cache:
+    level: INFO
+
+  studip_fuse.real_path.resolve:
+    level: INFO
+
+root:
+  level: DEBUG
+  handlers: [syslog, file, console]
+
+disable_existing_loggers: False

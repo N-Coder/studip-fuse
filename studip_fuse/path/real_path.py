@@ -11,9 +11,7 @@ from studip_fuse.cache import schedule_task
 from studip_fuse.path.path_util import normalize_path, path_head, path_name, path_tail
 from studip_fuse.path.virtual_path import VirtualPath
 
-log = logging.getLogger("studip_fuse.real_path")
-iter_log = log.getChild("resolve")
-iter_log.setLevel(logging.INFO)  # TODO remove setting logging levels statically
+iter_log = logging.getLogger("studip_fuse.real_path.resolve")
 
 
 @attr.s(frozen=True, str=False, repr=False, hash=False)

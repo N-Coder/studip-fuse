@@ -146,7 +146,7 @@ class VirtualPath(object):
             d["st_mtime"] = self.mod_times[1].timestamp()
         if not self.is_folder:
             if self._file.size is None:
-                logging.warning("Size of file %s unknown, because the value wasn't loaded from Stud.IP", file)
+                log.warning("Size of file %s unknown, because the value wasn't loaded from Stud.IP", self._file)
             else:
                 d["st_size"] = self._file.size
         # elif self.list_contents().done(): #FIXME wrong thread

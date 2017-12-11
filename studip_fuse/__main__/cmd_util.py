@@ -1,13 +1,9 @@
 import argparse as argparse
-import asyncio
 import logging
 import os
-import sys
-import threading
-import traceback
 
 import appdirs
-from more_itertools import flatten, one
+from more_itertools import flatten
 
 
 def parse_args():
@@ -79,72 +75,3 @@ def StoreNameValuePair(option_parser):
                 logging.debug("Ignoring arguments %s" % ", ".join(ignored_values))
 
     return anonymous_class
-
-
-def getpass(args):
-    if args.pwfile == "-":
-        from getpass import getpass
-        return getpass()
-    else:
-        try:
-            with open(args.pwfile) as f:
-                return f.read()
-        except FileNotFoundError as e:
-            logging.warning("%s. Either specifiy a file from which your Stud.IP password can be read "
-                            "or use `--pwfile -` to enter it using a promt in the shell." % e)
-            raise
-
-
-thread_log = logging.getLogger("threads")
-
-
-def await_loop_thread_shutdown(loop, loop_thread):
-    # print loop stack trace until the loop thread completed
-    counter = 0
-    while loop_thread.is_alive() and counter < 4:
-        loop_thread.join(5)
-        counter += 1
-        if loop_thread.is_alive():
-            if loop:
-                dump_loop_stack(loop)
-            else:
-                dump_thread_stack(loop_thread)
-
-    if loop_thread.is_alive():
-        logging.warning("Shutting down main thread and thus killing hung event loop daemon thread")
-
-
-def format_stack(stack):
-    return "".join(traceback.format_stack(stack[0] if isinstance(stack, list) else stack))
-
-
-def dump_loop_stack(loop):
-    current_task = asyncio.Task.current_task(loop=loop)
-    pending_tasks = [t for t in asyncio.Task.all_tasks(loop=loop) if not t.done() and t is not current_task]
-    loop_thread = one(t for t in threading.enumerate() if t.ident == loop._thread_id)
-    loop_thread_stack = sys._current_frames()[loop_thread.ident]
-    loop_thread_stack_trace = format_stack(loop_thread_stack)
-
-    if thread_log.isEnabledFor(logging.DEBUG):
-        thread_log.debug("Current task %s in loop %s in loop thread %s", current_task, loop, loop_thread)
-        if current_task:
-            thread_log.debug("Task stack trace:\n %s", format_stack(current_task.get_stack()))
-        thread_log.debug("Thread stack trace:\n %s", loop_thread_stack_trace)
-        pending_tasks_str = "\n".join(
-            str(t) + "\n" + format_stack(t.get_stack())
-            for t in pending_tasks)
-        thread_log.debug("%s further pending tasks:\n %s", len(pending_tasks), pending_tasks_str)
-    else:
-        thread_log.info("Waiting for event loop to stop... (%s further pending tasks after current task %s "
-                        "in loop %s in loop thread %s)", len(pending_tasks), current_task, loop, loop_thread)
-
-    if len(pending_tasks) == 0 and current_task is None \
-            and "epoll.poll(timeout, max_ev)" in loop_thread_stack_trace.strip().split("\n")[-1]:
-        thread_log.warning("Event loop hangs in epoll selector without any tasks pending. "
-                           "This is probably a python bug (https://bugs.python.org/issue29780).")
-
-
-def dump_thread_stack(loop_thread):
-    thread_log.info("Waiting for loop thread to abort initialization...")
-    if thread_log.isEnabledFor(logging.DEBUG):
-        thread_log.debug("Thread stack trace:\n %s", format_stack(sys._current_frames()[loop_thread.ident]))

@@ -37,6 +37,8 @@ def future_context(future):
     except Exception as e:
         if not future.done():
             future.set_exception(e)
+        else:
+            raise
     finally:
         if not future.done():
             msg = "Event loop thread did not report result back to main thread."
@@ -67,12 +69,11 @@ def loop_context(args):
 @contextmanager
 def session_context(args, http_args, loop, future: concurrent.futures.Future):
     log.info("Opening StudIP session...")
-    password = getpass(args)
 
     session = CachedStudIPSession(
         loop=loop, studip_base=args.studip, sso_base=args.sso, cache_dir=args.cache, http_args=http_args)
     try:
-        coro = session.do_login(user_name=args.user, password=password.strip())
+        coro = session.do_login(user_name=args.user, password=args.get_password())
         task = asyncio.ensure_future(coro, loop=loop)
         future.add_done_callback(lambda f: task.cancel() if f.cancelled() else None)
 
