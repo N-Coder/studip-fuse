@@ -3,6 +3,7 @@ import functools
 import logging
 
 async_cache_log = logging.getLogger("studip_fuse.async_cache")
+async_cache_log.setLevel(logging.INFO)  # TODO remove setting logging levels statically
 
 call_counter = 0
 

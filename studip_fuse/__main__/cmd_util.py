@@ -9,26 +9,6 @@ import traceback
 import appdirs
 from more_itertools import flatten, one
 
-thread_log = logging.getLogger("threads")
-
-
-def StoreNameValuePair(option_parser):
-    class anonymous_class(argparse.Action):
-        def __call__(self, parser, namespace, values, option_string=None):
-            ignored_values = []
-            values = flatten(v.split(',') for v in values)
-            for value in values:
-                if value in ["suid", "nosuid", "dev", "nodev", "ro"]:
-                    ignored_values.append(value)
-                elif value == "rw":
-                    parser.error("Stud.IP FUSE only supports read-only mount")
-                else:
-                    option_parser.parse_args(["--" + value], namespace)
-            if ignored_values:
-                logging.debug("Ignoring arguments %s" % ", ".join(ignored_values))
-
-    return anonymous_class
-
 
 def parse_args():
     from studip_fuse import __version__ as prog_version, __author__ as prog_author
@@ -83,6 +63,61 @@ def parse_args():
     return args, http_args, fuse_args
 
 
+def StoreNameValuePair(option_parser):
+    class anonymous_class(argparse.Action):
+        def __call__(self, parser, namespace, values, option_string=None):
+            ignored_values = []
+            values = flatten(v.split(',') for v in values)
+            for value in values:
+                if value in ["suid", "nosuid", "dev", "nodev", "ro"]:
+                    ignored_values.append(value)
+                elif value == "rw":
+                    parser.error("Stud.IP FUSE only supports read-only mount")
+                else:
+                    option_parser.parse_args(["--" + value], namespace)
+            if ignored_values:
+                logging.debug("Ignoring arguments %s" % ", ".join(ignored_values))
+
+    return anonymous_class
+
+
+def getpass(args):
+    if args.pwfile == "-":
+        from getpass import getpass
+        return getpass()
+    else:
+        try:
+            with open(args.pwfile) as f:
+                return f.read()
+        except FileNotFoundError as e:
+            logging.warning("%s. Either specifiy a file from which your Stud.IP password can be read "
+                            "or use `--pwfile -` to enter it using a promt in the shell." % e)
+            raise
+
+
+thread_log = logging.getLogger("threads")
+
+
+def await_loop_thread_shutdown(loop, loop_thread):
+    # print loop stack trace until the loop thread completed
+    counter = 0
+    while loop_thread.is_alive() and counter < 4:
+        loop_thread.join(5)
+        counter += 1
+        if loop_thread.is_alive():
+            if loop:
+                dump_loop_stack(loop)
+            else:
+                dump_thread_stack(loop_thread)
+
+    if loop_thread.is_alive():
+        logging.warning("Shutting down main thread and thus killing hung event loop daemon thread")
+
+
+def format_stack(stack):
+    return "".join(traceback.format_stack(stack[0] if isinstance(stack, list) else stack))
+
+
 def dump_loop_stack(loop):
     current_task = asyncio.Task.current_task(loop=loop)
     pending_tasks = [t for t in asyncio.Task.all_tasks(loop=loop) if not t.done() and t is not current_task]
@@ -109,5 +144,7 @@ def dump_loop_stack(loop):
                            "This is probably a python bug (https://bugs.python.org/issue29780).")
 
 
-def format_stack(stack):
-    return "".join(traceback.format_stack(stack[0] if isinstance(stack, list) else stack))
+def dump_thread_stack(loop_thread):
+    thread_log.info("Waiting for loop thread to abort initialization...")
+    if thread_log.isEnabledFor(logging.DEBUG):
+        thread_log.debug("Thread stack trace:\n %s", format_stack(sys._current_frames()[loop_thread.ident]))

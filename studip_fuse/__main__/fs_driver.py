@@ -1,22 +1,70 @@
 import asyncio
+import concurrent.futures
 import errno
 import functools
 import logging
+import logging.handlers
 import os
+from threading import Thread
 from typing import List
 
 import attr
-from fuse import LoggingMixIn, Operations
+from fuse import LoggingMixIn, Operations, fuse_get_context
 
-from studip_fuse.path import RealPath, path_name
+from studip_fuse.__main__.cmd_util import await_loop_thread_shutdown
+from studip_fuse.__main__.main_loop import main_loop
+from studip_fuse.path import RealPath, VirtualPath, path_name
 
-log = logging.getLogger("studip_fuse.fs_drive")
+log = logging.getLogger("studip_fuse.fs_driver")
 
 
-@attr.s(frozen=True)
+@attr.s(hash=False)
 class FUSEView(Operations):
-    root_rp: RealPath = attr.ib()
-    loop = attr.ib(hash=False)
+    args = attr.ib()
+    http_args = attr.ib()
+    fuse_args = attr.ib()
+
+    loop_future = attr.ib(init=False, default=None)
+    loop_thread = attr.ib(init=False, default=None)
+    loop = attr.ib(init=False, default=None)
+    session = attr.ib(init=False, default=None)
+    root_rp: RealPath = attr.ib(init=False, default=None)
+
+    def init(self, path):
+        logging.basicConfig(level=logging.DEBUG,
+                            handlers=[logging.handlers.SysLogHandler(address="/dev/log"), logging.StreamHandler(),
+                                      logging.FileHandler("/tmp/studip.log")],
+                            format='%(process)s %(asctime)s %(levelname).1s %(name)-15.15s - %(message)s')
+
+        log.info("Mounting at %s (uid=%s, gid=%s, pid=%s, python pid=%s)", path, *fuse_get_context(),
+                 os.getpid())
+
+        self.loop_future = concurrent.futures.Future()
+        self.loop_thread = Thread(target=main_loop, args=(self.args, self.http_args, self.loop_future),
+                                  name="aio event loop", daemon=True)
+        self.loop_thread.start()
+        log.debug("Event loop thread %s started, waiting for session initialization", self.loop_thread)
+        self.loop, self.session = self.loop_future.result()
+
+        vp = VirtualPath(session=self.session, path_segments=[], known_data={}, parent=None,
+                         next_path_segments=self.args.format.split("/"))
+        self.root_rp = RealPath(parent=None, generating_vps={vp})
+        log.debug("Session and virtual FS initialized")
+
+        log.info("Mounting complete")
+
+    def destroy(self, path):
+        log.info("Unmounting from %s (uid=%s, gid=%s, pid=%s, python pid=%s)", path, *fuse_get_context(),
+                 os.getpid())
+
+        if self.loop_future:
+            self.loop_future.cancel()
+        if self.loop:
+            self.loop.stop()
+        if self.loop_thread:
+            await_loop_thread_shutdown(self.loop, self.loop_thread)
+
+        log.info("Unmounting complete")
 
     def await_async(self, coro):
         return asyncio.run_coroutine_threadsafe(coro, self.loop).result()
@@ -70,6 +118,6 @@ class FUSEView(Operations):
         return self.flush(path, fh)
 
 
-@attr.s(frozen=True)
+@attr.s()
 class LoggingFUSEView(FUSEView, LoggingMixIn):
     pass

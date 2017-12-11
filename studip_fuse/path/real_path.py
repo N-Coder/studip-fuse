@@ -13,7 +13,7 @@ from studip_fuse.path.virtual_path import VirtualPath
 
 log = logging.getLogger("studip_fuse.real_path")
 iter_log = log.getChild("resolve")
-iter_log.setLevel(logging.INFO)
+iter_log.setLevel(logging.INFO)  # TODO remove setting logging levels statically
 
 
 @attr.s(frozen=True, str=False, repr=False, hash=False)
@@ -77,7 +77,7 @@ class RealPath(object):
             iter_log.debug("Resolved path '%s // %s' to '%s'", self, rel_path, resolved_real_file)
             return resolved_real_file
         else:
-            iter_log.debug("No such file or directory '%s // %s'!", self, rel_path, rel_path, content_file)
+            iter_log.debug("No such file or directory '%s // %s'!", self, rel_path)
             return None
 
     @functools.lru_cache()
