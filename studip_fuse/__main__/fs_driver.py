@@ -29,7 +29,7 @@ class FUSEView(Operations):
     loop_thread = attr.ib(init=False, default=None)
     loop = attr.ib(init=False, default=None)
     session = attr.ib(init=False, default=None)
-    root_rp: RealPath = attr.ib(init=False, default=None)
+    root_rp = attr.ib(init=False, default=None)  # type: RealPath
 
     def init(self, path):
         try:

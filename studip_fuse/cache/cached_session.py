@@ -10,7 +10,7 @@ from studip_fuse.cache import schedule_task
 
 @attr.s(hash=False)
 class CachedStudIPSession(StudIPSession):
-    cache_dir: str = attr.ib()
+    cache_dir = attr.ib()  # type: str
 
     @functools.lru_cache()
     @schedule_task()

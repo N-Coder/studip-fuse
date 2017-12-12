@@ -16,8 +16,8 @@ iter_log = logging.getLogger("studip_fuse.real_path.resolve")
 
 @attr.s(frozen=True, str=False, repr=False, hash=False)
 class RealPath(object):
-    parent: 'RealPath' = attr.ib()
-    generating_vps: Set[VirtualPath] = attr.ib()
+    parent = attr.ib()  # type: 'RealPath'
+    generating_vps = attr.ib()  # type: Set[VirtualPath]
 
     @generating_vps.validator
     def validate(self, *_):
@@ -83,7 +83,7 @@ class RealPath(object):
     async def list_contents(self) -> List['RealPath']:
         # merge duplicate sub-entries by putting them in the same Set
         # (required e.g. for folder with lecture name and subfolder with course type)
-        contents: Dict[str, Set[VirtualPath]] = dict()
+        contents = dict()  # type: Dict[str, Set[VirtualPath]]
 
         # initialize the set with the root paths
         for root_vp in self.generating_vps:

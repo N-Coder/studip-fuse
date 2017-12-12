@@ -11,7 +11,6 @@ import attr
 from cached_property import cached_property
 
 from studip_api.model import Course, File, Folder, Semester
-from studip_api.session import StudIPSession
 from studip_fuse.cache import schedule_task
 from studip_fuse.path.path_util import Charset, EscapeMode, escape_file_name, get_format_segment_requires, \
     normalize_path, path_head, path_tail
@@ -21,11 +20,11 @@ log = logging.getLogger("studip_fuse.virtual_path")
 
 @attr.s(frozen=True, str=False, repr=False, hash=False)
 class VirtualPath(object):
-    session: 'StudIPSession' = attr.ib()
-    path_segments: List[str] = attr.ib()  # {0,n}
-    known_data: Dict[Type, Any] = attr.ib()
-    parent: Optional['VirtualPath'] = attr.ib()
-    next_path_segments: List[str] = attr.ib()
+    session = attr.ib()  # type: 'StudIPSession'
+    path_segments = attr.ib()  # type: List[str]
+    known_data = attr.ib()  # type: Dict[Type, Any]
+    parent = attr.ib()  # type: Optional['VirtualPath']
+    next_path_segments = attr.ib()  # type: List[str]
 
     # __init__  ########################################################################################################
 
@@ -77,14 +76,16 @@ class VirtualPath(object):
                 return [self._sub_path(new_known_data={Course: c})
                         for c in await self.session.get_courses(self._semester)]
             else:
-                return [
-                    # using `as_completed`, first schedule `get_courses` for all `s`, then await the results
-                    # if `get_courses` would be directly awaited, scheduling and execution would be sequential
-                    self._sub_path(new_known_data={Course: await fc})
-                    for fc in as_completed(
+                list = []
+                # using `as_completed`, first schedule `get_courses` for all `s`, then await the results
+                # if `get_courses` would be directly awaited, scheduling and execution would be sequential
+                for fc in as_completed(
                         self.session.get_courses(s)
                         for s in await self.session.get_semesters()
-                    )]
+                ):
+                    # XXX python 3.5 doesn't support await inside list comprehensions
+                    list.append(self._sub_path(new_known_data={Course: await fc}))
+                return list
 
         elif Semester in self._content_options:
             if self._semester:  # everything is already known, no options on this level
@@ -111,23 +112,25 @@ class VirtualPath(object):
                 files = [f
                          for f in (await self.session.get_course_files(self._course)).contents]
             elif self._semester:
-                files = [
-                    (await ff).contents
-                    for ff in as_completed(
+                files = []
+                for ff in as_completed(
                         self.session.get_course_files(c)
                         for c in await self.session.get_courses(self._semester)
-                    )]
+                ):
+                    # XXX python 3.5 doesn't support await inside list comprehensions
+                    files.append((await ff).contents)
             else:
-                files = [
-                    (await ff).contents
+                files = []
+                # XXX python 3.5 doesn't support await inside list comprehensions
+                for fc in as_completed(
+                        self.session.get_courses(s)
+                        for s in await self.session.get_semesters()
+                ):
                     for ff in as_completed(
-                        # the following await lead to partially sequential execution in very rare cases
-                        self.session.get_course_files(await fc)
-                        for fc in as_completed(
-                            self.session.get_courses(s)
-                            for s in await self.session.get_semesters()
-                        )
-                    )]
+                            # the following await lead to partially sequential execution in very rare cases
+                            self.session.get_course_files(await fc)
+                    ):
+                        files.append((await ff).contents)
 
         return [self._sub_path(new_known_data={File: f}, increment_path_segments=not self._loop_over_path)
                 for f in files]
