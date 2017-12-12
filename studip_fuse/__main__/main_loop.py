@@ -88,4 +88,4 @@ def session_context(args, http_args, loop, future: concurrent.futures.Future):
             log.debug("Session closed")
 
         log.info("Initiating shut down sequence...")
-        loop.run_until_complete(shutdown_session_async(loop))
+        loop.run_until_complete(shutdown_session_async(session))

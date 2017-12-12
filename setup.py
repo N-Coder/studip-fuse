@@ -21,12 +21,15 @@ if __name__ == "__main__":
             'studip_fuse': ['__main__/logging.yaml'],
         },
         install_requires=[
-            "studip-api=="+version,
+            "studip-api",  # ==" + version, # Version in dependency_links not detected correctly
             "fusepy",
             "argparse",
             "appdirs",
             "sh",
             "pyyaml"
+        ],
+        dependency_links=[
+            "git+https://github.com/N-Coder/studip-api#egg=studip-api"  # -" + version
         ],
         entry_points={
             "console_scripts": ["studip-fuse = studip_fuse.__main__:main"]
@@ -34,7 +37,6 @@ if __name__ == "__main__":
         version=version,
         description="Python FUSE drive for courses and files available through the Stud.IP University Access Portal",
         long_description=long_descr,
-        # TODO add logging.yaml
         author="Simon Fink",
         url="https://github.com/N-Coder/studip-fuse"
     )

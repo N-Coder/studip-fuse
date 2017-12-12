@@ -121,6 +121,5 @@ class FUSEView(Operations):
         return self.flush(path, fh)
 
 
-@attr.s()
 class LoggingFUSEView(FUSEView, LoggingMixIn):
     pass
