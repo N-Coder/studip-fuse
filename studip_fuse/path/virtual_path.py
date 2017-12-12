@@ -77,14 +77,15 @@ class VirtualPath(object):
                         for c in await self.session.get_courses(self._semester)]
             else:
                 list = []
+                # XXX python 3.5 doesn't support await inside list comprehensions
                 # using `as_completed`, first schedule `get_courses` for all `s`, then await the results
                 # if `get_courses` would be directly awaited, scheduling and execution would be sequential
-                for fc in as_completed(
-                        self.session.get_courses(s)
-                        for s in await self.session.get_semesters()
-                ):
-                    # XXX python 3.5 doesn't support await inside list comprehensions
-                    list.append(self._sub_path(new_known_data={Course: await fc}))
+                for fcs in as_completed([
+                    self.session.get_courses(s)
+                    for s in await self.session.get_semesters()
+                ]):
+                    for course in await fcs:
+                        list.append(self._sub_path(new_known_data={Course: course}))
                 return list
 
         elif Semester in self._content_options:
@@ -113,24 +114,27 @@ class VirtualPath(object):
                          for f in (await self.session.get_course_files(self._course)).contents]
             elif self._semester:
                 files = []
-                for ff in as_completed(
-                        self.session.get_course_files(c)
-                        for c in await self.session.get_courses(self._semester)
-                ):
-                    # XXX python 3.5 doesn't support await inside list comprehensions
-                    files.append((await ff).contents)
+                # XXX python 3.5 doesn't support await inside list comprehensions
+                for ffs in as_completed([
+                    self.session.get_course_files(c)
+                    for c in await self.session.get_courses(self._semester)
+                ]):
+                    for folder in await ffs:
+                        files += folder.contents
             else:
                 files = []
                 # XXX python 3.5 doesn't support await inside list comprehensions
-                for fc in as_completed(
-                        self.session.get_courses(s)
-                        for s in await self.session.get_semesters()
-                ):
-                    for ff in as_completed(
-                            # the following await lead to partially sequential execution in very rare cases
-                            self.session.get_course_files(await fc)
-                    ):
-                        files.append((await ff).contents)
+                for fcs in as_completed([
+                    self.session.get_courses(s)
+                    for s in await self.session.get_semesters()
+                ]):
+                    # the following await lead to partially sequential execution in very rare cases
+                    for course in await fcs:
+                        for ffs in as_completed([
+                            self.session.get_course_files(course)
+                        ]):
+                            for folder in await ffs:
+                                files += folder.contents
 
         return [self._sub_path(new_known_data={File: f}, increment_path_segments=not self._loop_over_path)
                 for f in files]
@@ -274,6 +278,8 @@ class VirtualPath(object):
             args["known_data"] = dict(args["known_data"])
             args["known_data"].update(new_known_data)
         args.update(kwargs)
+        for type, value in args["known_data"].items():
+            assert isinstance(value, type), "known_data item '%s' must be of type %s" % (value, type)
         return VirtualPath(**args)
 
     # utils  ###########################################################################################################

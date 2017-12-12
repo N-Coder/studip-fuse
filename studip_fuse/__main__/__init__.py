@@ -15,7 +15,8 @@ class LoggerWriter:
         self.level = level
 
     def write(self, message):
-        if message.strip():
+        message = message.strip()
+        if message:
             self.level(message)
 
     def flush(self):

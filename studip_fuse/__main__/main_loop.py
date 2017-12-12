@@ -59,7 +59,8 @@ def loop_context(args):
         async def shutdown_loop_async(loop):
             log.debug("Draining loop")
             await asyncio.sleep(1)
-            await loop.shutdown_asyncgens()
+            if "shutdown_asyncgens" in loop:
+                await loop.shutdown_asyncgens()
             log.debug("Loop drained")
 
         loop.run_until_complete(shutdown_loop_async(loop))
