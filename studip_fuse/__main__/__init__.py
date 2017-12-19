@@ -11,23 +11,27 @@ def excepthook(type, value, tb):
 
 
 class LoggerWriter:
-    def __init__(self, level):
+    def __init__(self, level, old):
         self.level = level
+        self.old = old
 
     def write(self, message):
+        if not self.old.closed:
+            self.old.write(message)
         message = message.strip()
         if message:
             self.level(message)
 
     def flush(self):
-        pass
+        if not self.old.closed:
+            self.old.flush()
 
 
 logging.config.dictConfig(yaml.load(pkg_resources.resource_string('studip_fuse.__main__', 'logging.yaml')))
 sys.excepthook = excepthook
 # reroute std streams after logging config, so that a config logging to sys.stdout still logs to the initial stream
-sys.stdout = LoggerWriter(logging.getLogger('studip_fuse.stdout').info)
-sys.stderr = LoggerWriter(logging.getLogger('studip_fuse.stderr').error)
+sys.stdout = LoggerWriter(logging.getLogger('studip_fuse.stdout').info, sys.stdout)
+sys.stderr = LoggerWriter(logging.getLogger('studip_fuse.stderr').error, sys.stderr)
 
 
 def main():
