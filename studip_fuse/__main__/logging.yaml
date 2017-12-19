@@ -31,6 +31,14 @@ loggers:
   studip_fuse.real_path.resolve:
     level: INFO
 
+  studip_fuse.stdout:
+    handlers: [syslog, file]
+    propagate: False
+
+  studip_fuse.stderr:
+    handlers: [syslog, file]
+    propagate: False
+
 root:
   level: DEBUG
   handlers: [syslog, file, console]
