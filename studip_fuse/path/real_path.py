@@ -1,4 +1,3 @@
-import functools
 import logging
 from asyncio import gather
 from typing import Callable, Dict, List, Optional, Set
@@ -7,7 +6,7 @@ import attr
 from cached_property import cached_property
 from more_itertools import one, unique_everseen
 
-from studip_fuse.cache import schedule_task
+from studip_fuse.cache import cached_task
 from studip_fuse.path.path_util import normalize_path, path_head, path_name, path_tail
 from studip_fuse.path.virtual_path import VirtualPath
 
@@ -50,8 +49,7 @@ class RealPath(object):
         if futures:
             await gather(*futures)
 
-    @functools.lru_cache()
-    @schedule_task()
+    @cached_task()
     async def resolve(self, rel_path) -> Optional['RealPath']:
         rel_path = normalize_path(rel_path)
         iter_log.debug("Resolving path '%s' relative to '%s'", rel_path, self)
@@ -78,8 +76,7 @@ class RealPath(object):
             iter_log.debug("No such file or directory '%s // %s'!", self, rel_path)
             return None
 
-    @functools.lru_cache()
-    @schedule_task()
+    @cached_task()
     async def list_contents(self) -> List['RealPath']:
         # merge duplicate sub-entries by putting them in the same Set
         # (required e.g. for folder with lecture name and subfolder with course type)
