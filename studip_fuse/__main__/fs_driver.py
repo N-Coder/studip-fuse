@@ -1,10 +1,10 @@
 import asyncio
 import concurrent.futures
 import errno
-import functools
 import logging.handlers
 import os
 import signal
+import threading
 from threading import Thread
 from typing import List
 
@@ -13,6 +13,7 @@ from fuse import LoggingMixIn, Operations, fuse_get_context
 
 from studip_fuse.__main__.main_loop import main_loop
 from studip_fuse.__main__.thread_util import await_loop_thread_shutdown
+from studip_fuse.cache import cached_task
 from studip_fuse.path import RealPath, VirtualPath, path_name
 
 log = logging.getLogger("studip_fuse.fs_driver")
@@ -67,32 +68,39 @@ class FUSEView(Operations):
 
         log.info("Unmounting complete")
 
-    def await_async(self, coro):
-        if not self.loop:
-            raise RuntimeError("Can't await async operation while event loop isn't available")
-        return asyncio.run_coroutine_threadsafe(coro, self.loop).result()
+    def __attrs_post_init__(self):
+        @cached_task(schedule_with=self.schedule_async, lock_with=threading.Lock)
+        async def _aresolve(path: str) -> RealPath:
+            resolved_real_file = await self.root_rp.resolve(path)
+            if not resolved_real_file:
+                raise OSError(errno.ENOENT, path)
+            else:
+                return resolved_real_file
 
-    @functools.lru_cache()  # TODO refactor multi-level caching, add ttl / SIGUSR-based clearing
-    def _resolve(self, partial: str) -> RealPath:
-        return self.await_async(self._aresolve(partial))
+        self._aresolve = _aresolve
 
-    async def _aresolve(self, partial: str) -> RealPath:
-        resolved_real_file = await self.root_rp.resolve(partial)
-        if not resolved_real_file:
-            raise OSError(errno.ENOENT, "No such file or directory", partial)
-        else:
-            return resolved_real_file
-
-    @functools.lru_cache()
-    def readdir(self, path, fh) -> List[str]:
-        async def _async() -> List[str]:
-            resolved_real_file = await self._aresolve(path)
-            if resolved_real_file.is_folder:
+        @cached_task(schedule_with=self.schedule_async, lock_with=threading.Lock)
+        async def _areaddir(path) -> List[str]:
+            resolved_real_file = await self.root_rp.resolve(path)
+            if not resolved_real_file:
+                raise OSError(errno.ENOENT, path)
+            elif resolved_real_file.is_folder:
                 return ['.', '..'] + [path_name(rp.path) for rp in await resolved_real_file.list_contents()]
             else:
                 raise OSError(errno.ENOTDIR)
 
-        return self.await_async(_async())
+        self._areaddir = _areaddir
+
+    def schedule_async(self, coro):
+        if not self.loop:
+            raise RuntimeError("Can't await async operation while event loop isn't available")
+        return asyncio.run_coroutine_threadsafe(coro, self.loop)
+
+    def _resolve(self, partial: str) -> RealPath:
+        return self._aresolve(partial).result()
+
+    def readdir(self, path, fh) -> List[str]:
+        return self._areaddir(path).result()
 
     def access(self, path, mode):
         return self._resolve(path).access(mode)
@@ -105,7 +113,7 @@ class FUSEView(Operations):
         if resolved_real_file.is_folder:
             raise OSError(errno.EISDIR)
         else:
-            return self.await_async(resolved_real_file.open_file(flags))
+            return self.schedule_async(resolved_real_file.open_file(flags)).result()
 
     def read(self, path, length, offset, fh):
         os.lseek(fh, offset, os.SEEK_SET)  # TODO make lazy
