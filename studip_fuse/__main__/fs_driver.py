@@ -4,7 +4,9 @@ import errno
 import logging.handlers
 import os
 import signal
+import tempfile
 import threading
+from stat import S_IFREG
 from threading import Thread
 from typing import List
 
@@ -14,6 +16,7 @@ from fuse import LoggingMixIn, Operations, fuse_get_context
 from studip_fuse.__main__.main_loop import main_loop
 from studip_fuse.__main__.thread_util import await_loop_thread_shutdown
 from studip_fuse.cache import cached_task
+from studip_fuse.cache.async_cache import clear_caches
 from studip_fuse.path import RealPath, VirtualPath, path_name
 
 log = logging.getLogger("studip_fuse.fs_driver")
@@ -103,12 +106,22 @@ class FUSEView(Operations):
         return self._areaddir(path).result()
 
     def access(self, path, mode):
+        if path == "/.clear_caches":
+            return
         return self._resolve(path).access(mode)
 
     def getattr(self, path, fh=None):
+        if path == "/.clear_caches":
+            return dict(st_mode=(S_IFREG | 0o755), st_nlink=1)
         return self._resolve(path).getattr()
 
     def open(self, path, flags):
+        if path == "/.clear_caches":
+            msg = clear_caches()
+            fh, tmp_path = tempfile.mkstemp()
+            os.write(fh, msg.encode())
+            return fh
+
         resolved_real_file = self._resolve(path)
         if resolved_real_file.is_folder:
             raise OSError(errno.EISDIR)
