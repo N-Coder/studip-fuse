@@ -16,8 +16,11 @@ class LoggerWriter:
         self.old = old
 
     def write(self, message):
-        if not self.old.closed:
-            self.old.write(message)
+        try:
+            if not self.old.closed:
+                self.old.write(message)
+        except AttributeError:
+            pass
         message = message.strip()
         if message:
             self.level(message)
@@ -25,13 +28,6 @@ class LoggerWriter:
     def flush(self):
         if not self.old.closed:
             self.old.flush()
-
-
-logging.config.dictConfig(yaml.load(pkg_resources.resource_string('studip_fuse.__main__', 'logging.yaml')))
-sys.excepthook = excepthook
-# reroute std streams after logging config, so that a config logging to sys.stdout still logs to the initial stream
-sys.stdout = LoggerWriter(logging.getLogger('studip_fuse.stdout').info, sys.stdout)
-sys.stderr = LoggerWriter(logging.getLogger('studip_fuse.stderr').error, sys.stderr)
 
 
 def main():
@@ -81,4 +77,10 @@ def main():
 
 
 if __name__ == "__main__":
+    logging.config.dictConfig(yaml.load(pkg_resources.resource_string('studip_fuse.__main__', 'logging.yaml')))
+    sys.excepthook = excepthook
+    # reroute std streams after logging config, so that a config logging to sys.stdout still logs to the initial stream
+    sys.stdout = LoggerWriter(logging.getLogger('studip_fuse.stdout').info, sys.stdout)
+    sys.stderr = LoggerWriter(logging.getLogger('studip_fuse.stderr').error, sys.stderr)
+
     main()
