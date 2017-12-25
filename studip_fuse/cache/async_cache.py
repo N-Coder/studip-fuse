@@ -4,6 +4,7 @@ import functools
 import inspect
 import logging
 import sys
+from datetime import datetime
 from typing import Any, Dict, NamedTuple, Union
 
 async_cache_log = logging.getLogger("studip_fuse.async_cache")
@@ -14,6 +15,13 @@ CallInfo = NamedTuple("CallInfo", [("call_counter", int), ("pending", int), ("su
 
 
 class DecoratorClass(object):
+    def __init__(self, user_func):
+        functools.update_wrapper(self, user_func)
+        assert self.__wrapped__ == user_func
+
+    def __getattr__(self, item):
+        return getattr(self.__wrapped__, item)
+
     def __get__(self, obj, type=None):
         # see https://stackoverflow.com/questions/47433768#comment81822552_47433786
         return functools.partial(self, obj)
@@ -23,14 +31,12 @@ class TaskScheduler(DecoratorClass):
     def __init__(self, user_func, schedule_with):
         # this must be defined here and not in the parent class, so that functools.update_wrapper doesn't overwrite
         # it when nesting DecoratorClasses
-        self.__user_func = user_func
+        super().__init__(user_func)
         self.__schedule_with = schedule_with
 
         self.__call_counter = 0
         self.__successful_calls = 0
         self.__failed_calls = 0
-
-        functools.update_wrapper(self, self.__user_func)
 
     def call_info(self):
         return CallInfo(self.__call_counter, (self.__call_counter - self.__successful_calls - self.__failed_calls),
@@ -45,22 +51,22 @@ class TaskScheduler(DecoratorClass):
         if async_cache_log.isEnabledFor(logging.DEBUG):
             async_cache_log.debug(
                 "Scheduling %s#%s: %s(%s%s)",
-                self.__user_func.__name__, my_call_counter, self.__schedule_with.__name__,
-                self.__user_func, inspect.signature(self.__user_func).bind(*args, **kwargs))
+                self.__wrapped__.__name__, my_call_counter, self.__schedule_with.__name__,
+                self.__wrapped__, inspect.signature(self.__wrapped__).bind(*args, **kwargs))
         future = self.__schedule_with(self.__call_async(my_call_counter, *args, **kwargs))
         # async_cache_log.debug("Scheduled #%s as %s", my_call_counter, future)
         return future
 
     async def __call_async(self, my_call_counter, *args, **kwargs):
-        async_cache_log.debug("Started execution of %s#%s", self.__user_func.__name__, my_call_counter)
+        async_cache_log.debug("Started execution of %s#%s", self.__wrapped__.__name__, my_call_counter)
         try:
-            result = await self.__user_func(*args, **kwargs)
-            async_cache_log.debug("Completed execution of %s#%s = %s", self.__user_func.__name__, my_call_counter,
+            result = await self.__wrapped__(*args, **kwargs)
+            async_cache_log.debug("Completed execution of %s#%s = %s", self.__wrapped__.__name__, my_call_counter,
                                   result)
             self.__successful_calls += 1
             return result
         except:
-            async_cache_log.debug("Execution of %s#%s failed with %s", self.__user_func.__name__, my_call_counter,
+            async_cache_log.debug("Execution of %s#%s failed with %s", self.__wrapped__.__name__, my_call_counter,
                                   sys.exc_info()[1])
             self.__failed_calls += 1
             raise
@@ -68,7 +74,7 @@ class TaskScheduler(DecoratorClass):
 
 class TaskCache(DecoratorClass):
     def __init__(self, user_func, lock_with):
-        self.__user_func = user_func
+        super().__init__(user_func)
         self.__lock_with = lock_with
 
         self.__hits = 0
@@ -76,8 +82,6 @@ class TaskCache(DecoratorClass):
 
         self.__cache = {}  # type: Dict[Any, Union[concurrent.futures.Future, asyncio.Future]]
         self.__lock = self.__lock_with()
-
-        functools.update_wrapper(self, self.__user_func)
 
     def cache_info(self):
         return CacheInfo(self.__hits, self.__misses, len(self.__cache))
@@ -121,16 +125,36 @@ class TaskCache(DecoratorClass):
                 self.__hits += 1
                 return res
 
-            res = self.__user_func(*args, **kwargs)
+            res = self.__wrapped__(*args, **kwargs)
             if not isinstance(res, FUTURE_TYPES):
                 raise RuntimeError("Expected result of user function %s to be of type %s, but got '%s' of type %s" % (
-                    self.__user_func, FUTURE_TYPES, res, res.__class__ if res else None))
+                    self.__wrapped__, FUTURE_TYPES, res, res.__class__ if res else None))
             self.__cache[key] = res
             self.__misses += 1
             return res
 
 
+last_cache_clear = datetime.now()
 cached_tasks = []
+
+
+def clear_caches():
+    global last_cache_clear, cached_tasks
+
+    async_cache_log.warning("Clearing caches...")
+    msg = "Clearing cache of %s tasks. Last clear was %s s ago at %s." % \
+          (len(cached_tasks), datetime.now() - last_cache_clear, last_cache_clear)
+
+    for task in cached_tasks:
+        msg += "Statistics for task %s:\n" \
+               "\tCalls: %s\n" \
+               "\tCache: %s\n" % (task.__name__, task.call_info(), task.cache_info())
+        task.cache_clear()
+
+    last_cache_clear = datetime.now()
+    msg = msg.strip()
+    async_cache_log.info(msg)
+    return msg
 
 
 class called_in_loop(object):
