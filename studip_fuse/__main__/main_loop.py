@@ -51,7 +51,7 @@ def loop_context(args):
     log.info("Initializing asyncio event loop...")
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
-    if args.debug:
+    if args.debug_aio:
         loop.set_debug(True)
     try:
         yield loop

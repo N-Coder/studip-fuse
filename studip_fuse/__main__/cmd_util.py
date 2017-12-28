@@ -12,7 +12,8 @@ def parse_args():
 
     opts_parser = argparse.ArgumentParser(add_help=False)
     opts_parser.add_argument("-o", help="FUSE-like options", nargs="+", action=StoreNameValuePair(opts_parser))
-    debug = opts_parser.add_argument("-d", "--debug", help="enable debug mode", action="store_true")
+    opts_parser.add_argument("-d", "--debug", help="turn on all debugging options", action="store_true")
+    opts_parser.add_argument("--debug-logging", help="turn on debug logging", action="store_true")
 
     studip_opts = opts_parser.add_argument_group("Stud.IP Driver Options")
     studip_opts.add_argument("--pwfile", help="path to password file or '-' to read from stdin",
@@ -26,25 +27,27 @@ def parse_args():
     fuse_opts = opts_parser.add_argument_group("FUSE Options")
     fuse_opts.add_argument("--foreground", help="run in foreground", action="store_true")
     fuse_opts.add_argument("--nothreads", help="single threads for FUSE", action="store_true")
-    fuse_opts.add_argument("--allow_other", help="allow access by all users", action="store_true")
-    fuse_opts.add_argument("--allow_root", help="allow access by root", action="store_true")
+    fuse_opts.add_argument("--allow-other", help="allow access by all users", action="store_true")
+    fuse_opts.add_argument("--allow-root", help="allow access by root", action="store_true")
     fuse_opts.add_argument("--nonempty", help="allow mounts over non-empty file/dir", action="store_true")
     fuse_opts.add_argument("--umask", help="set file permissions (octal)", action="store")
     fuse_opts.add_argument("--uid", help="set file owner", action="store")
     fuse_opts.add_argument("--gid", help="set file group", action="store")
-    fuse_opts.add_argument("--default_permissions", help="enable permission checking by kernel",
+    fuse_opts.add_argument("--default-permissions", help="enable permission checking by kernel",
                            action="store_true")
+    fuse_opts.add_argument("--debug-fuse", help="enable FUSE debug mode (includes --foreground)", action="store_true")
 
     http_opts = opts_parser.add_argument_group("HTTP Client Options")
-    http_opts.add_argument("--read_timeout", action="store", help="request operations timeout in seconds", default=30,
+    http_opts.add_argument("--read-timeout", action="store", help="request operations timeout in seconds", default=30,
                            type=float)
-    http_opts.add_argument("--conn_timeout", action="store", help="timeout for connection establishing in seconds",
+    http_opts.add_argument("--conn-timeout", action="store", help="timeout for connection establishing in seconds",
                            default=30, type=float)
-    http_opts.add_argument("--keepalive_timeout", action="store",
+    http_opts.add_argument("--keepalive-timeout", action="store",
                            help="timeout for connection reusing after releasing in seconds", default=60, type=float)
     http_opts.add_argument("--limit", action="store", help="total number simultaneous connections", default=10,
                            type=int)
-    http_opts.add_argument("--force_close", action="store_true", help="disable HTTP keep-alive")
+    http_opts.add_argument("--force-close", action="store_true", help="disable HTTP keep-alive")
+    debug_aio = http_opts.add_argument("--debug-aio", help="turn on aiohttp debug logging", action="store_true")
 
     parser = argparse.ArgumentParser(description="Stud.IP Fuse", formatter_class=argparse.ArgumentDefaultsHelpFormatter,
                                      parents=[opts_parser])
@@ -53,8 +56,15 @@ def parse_args():
     parser.add_argument("-V", "--version", action="version", version="%(prog)s " + prog_version)
 
     args = parser.parse_args()
-    http_args = {a.dest: getattr(args, a.dest, None) for a in http_opts._group_actions}
-    fuse_args = {a.dest: getattr(args, a.dest, None) for a in fuse_opts._group_actions + [debug]
+
+    if args.debug:
+        args.debug_logging = True
+        args.debug_fuse = True
+        args.debug_aio = True
+
+    http_args = {a.dest: getattr(args, a.dest, None) for a in http_opts._group_actions
+                 if a is not debug_aio}
+    fuse_args = {a.dest: getattr(args, a.dest, None) for a in fuse_opts._group_actions
                  if getattr(args, a.dest, None) is not None}
     return args, http_args, fuse_args
 

@@ -1,9 +1,12 @@
 import logging
 import logging.config
 import sys
+import threading
 
 import pkg_resources
 import yaml
+
+from studip_fuse.__main__.cmd_util import parse_args
 
 
 def excepthook(type, value, tb):
@@ -14,16 +17,24 @@ class LoggerWriter:
     def __init__(self, level, old):
         self.level = level
         self.old = old
+        self._local = threading.local()
+        self._local.writing = False
 
     def write(self, message):
+        if self._local.writing:
+            return
+        self._local.writing = True
         try:
-            if not self.old.closed:
-                self.old.write(message)
-        except AttributeError:
-            pass
-        message = message.strip()
-        if message:
-            self.level(message)
+            try:
+                if not self.old.closed:
+                    self.old.write(message)
+            except AttributeError:
+                pass
+            message = message.strip()
+            if message:
+                self.level(message)
+        finally:
+            self._local.writing = False
 
     def flush(self):
         if not self.old.closed:
@@ -32,14 +43,17 @@ class LoggerWriter:
 
 def main():
     try:
-        from studip_fuse.__main__.cmd_util import parse_args
+        logging.config.dictConfig(yaml.load(pkg_resources.resource_string('studip_fuse.__main__', 'logging.yaml')))
+        sys.excepthook = excepthook
+        # reroute std streams after logging config, so that a config logging to sys.stdout still logs to the initial stream
+        sys.stdout = LoggerWriter(logging.getLogger('studip_fuse.stdout').info, sys.stdout)
+        sys.stderr = LoggerWriter(logging.getLogger('studip_fuse.stderr').error, sys.stderr)
+
         args, http_args, fuse_args = parse_args()
 
-        # TODO make control over debug mode and logging more fine granular
-        # TODO improve log output in different modi
-        if not args.debug:
+        if not args.debug_logging:
             logging.root.setLevel(logging.INFO)
-            logging.getLogger("sh").setLevel(logging.WARNING)
+        if not args.debug_aio:
             logging.getLogger("asyncio").setLevel(logging.WARNING)
         logging.debug("Program started")
 
@@ -47,7 +61,7 @@ def main():
         os.makedirs(args.cache, exist_ok=True)
 
         from studip_fuse.__main__.fs_driver import LoggingFUSEView, FUSEView
-        if args.debug:
+        if args.debug_fuse:
             fuse_ops = LoggingFUSEView(args, http_args, fuse_args)
         else:
             fuse_ops = FUSEView(args, http_args, fuse_args)
@@ -69,7 +83,7 @@ def main():
         logging.debug("Starting FUSE driver to mount at %s (uid=%s, gid=%s, pid=%s, python pid=%s)", args.mount,
                       *fuse_get_context(), os.getpid())
         # This calls fork if args.foreground == False (https://bugs.python.org/issue21998)
-        FUSE(fuse_ops, args.mount, **fuse_args)
+        FUSE(fuse_ops, args.mount, debug=fuse_args.pop("debug_fuse"), **fuse_args)
     except:
         logging.error("main() function quit exceptionally", exc_info=True)
     finally:
@@ -77,10 +91,4 @@ def main():
 
 
 if __name__ == "__main__":
-    logging.config.dictConfig(yaml.load(pkg_resources.resource_string('studip_fuse.__main__', 'logging.yaml')))
-    sys.excepthook = excepthook
-    # reroute std streams after logging config, so that a config logging to sys.stdout still logs to the initial stream
-    sys.stdout = LoggerWriter(logging.getLogger('studip_fuse.stdout').info, sys.stdout)
-    sys.stderr = LoggerWriter(logging.getLogger('studip_fuse.stderr').error, sys.stderr)
-
     main()
