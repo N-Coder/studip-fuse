@@ -5,7 +5,6 @@ import logging.handlers
 import os
 import signal
 import tempfile
-import threading
 from stat import S_IFREG
 from threading import Thread
 from typing import List
@@ -71,39 +70,36 @@ class FUSEView(Operations):
 
         log.info("Unmounting complete")
 
-    def __attrs_post_init__(self):
-        @cached_task(schedule_with=self.schedule_async, lock_with=threading.Lock)
-        async def _aresolve(path: str) -> RealPath:
-            resolved_real_file = await self.root_rp.resolve(path)
-            if not resolved_real_file:
-                raise OSError(errno.ENOENT, path)
-            else:
-                return resolved_real_file
-
-        self._aresolve = _aresolve
-
-        @cached_task(schedule_with=self.schedule_async, lock_with=threading.Lock)
-        async def _areaddir(path) -> List[str]:
-            resolved_real_file = await self.root_rp.resolve(path)
-            if not resolved_real_file:
-                raise OSError(errno.ENOENT, path)
-            elif resolved_real_file.is_folder:
-                return ['.', '..'] + [path_name(rp.path) for rp in await resolved_real_file.list_contents()]
-            else:
-                raise OSError(errno.ENOTDIR)
-
-        self._areaddir = _areaddir
-
     def schedule_async(self, coro):
         if not self.loop:
             raise RuntimeError("Can't await async operation while event loop isn't available")
         return asyncio.run_coroutine_threadsafe(coro, self.loop)
 
     def _resolve(self, partial: str) -> RealPath:
-        return self._aresolve(partial).result()
+        coro = self._aresolve(partial)
+        task = self.schedule_async(coro)
+        return task.result()
+
+    @cached_task()
+    async def _aresolve(self, path: str) -> RealPath:
+        resolved_real_file = await self.root_rp.resolve(path)
+        if not resolved_real_file:
+            raise OSError(errno.ENOENT, path)
+        else:
+            return resolved_real_file
 
     def readdir(self, path, fh) -> List[str]:
-        return self._areaddir(path).result()
+        return self.schedule_async(self._areaddir(path)).result()
+
+    @cached_task()
+    async def _areaddir(self, path) -> List[str]:
+        resolved_real_file = await self.root_rp.resolve(path)
+        if not resolved_real_file:
+            raise OSError(errno.ENOENT, path)
+        elif resolved_real_file.is_folder:
+            return ['.', '..'] + [path_name(rp.path) for rp in await resolved_real_file.list_contents()]
+        else:
+            raise OSError(errno.ENOTDIR)
 
     def access(self, path, mode):
         if path == "/.clear_caches":
@@ -112,12 +108,12 @@ class FUSEView(Operations):
 
     def getattr(self, path, fh=None):
         if path == "/.clear_caches":
-            return dict(st_mode=(S_IFREG | 0o755), st_nlink=1)
+            return dict(st_mode=(S_IFREG | 0o755), st_nlink=1, st_size=2048)
         return self._resolve(path).getattr()
 
     def open(self, path, flags):
         if path == "/.clear_caches":
-            msg = clear_caches()
+            msg = self.schedule_async(clear_caches()).result()
             fh, tmp_path = tempfile.mkstemp()
             os.write(fh, msg.encode())
             return fh
