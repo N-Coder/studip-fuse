@@ -67,8 +67,8 @@ class FUSEView(Operations):
 
         if self.loop_future:
             self.loop_future.cancel()
-        if self.loop:
-            self.loop.stop()
+        if self.loop and self.loop.is_running():
+            self.loop.call_soon_threadsafe(self.loop.stop)
         if self.loop_thread:
             await_loop_thread_shutdown(self.loop, self.loop_thread)
 
