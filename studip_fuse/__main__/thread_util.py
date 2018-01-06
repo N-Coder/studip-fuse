@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import signal
 import sys
 import threading
 import traceback
@@ -35,6 +36,7 @@ def dump_loop_stack(loop):
     loop_thread = one(t for t in threading.enumerate() if t.ident == loop._thread_id)
     loop_thread_stack = sys._current_frames()[loop_thread.ident]
     loop_thread_stack_trace = format_stack(loop_thread_stack)
+    scheduled = getattr(loop, "_scheduled", None)
 
     if log.isEnabledFor(logging.DEBUG):
         log.debug("Current task %s in loop %s in loop thread %s", current_task, loop, loop_thread)
@@ -45,14 +47,24 @@ def dump_loop_stack(loop):
             str(t) + "\n" + format_stack(t.get_stack())
             for t in pending_tasks)
         log.debug("%s further pending tasks:\n %s", len(pending_tasks), pending_tasks_str)
+        if scheduled is not None:
+            log.debug("%s further scheduled tasks:\n %s", len(scheduled), scheduled)
     else:
         log.info("Waiting for event loop to stop... (%s further pending tasks after current task %s "
                  "in loop %s in loop thread %s)", len(pending_tasks), current_task, loop, loop_thread)
 
-    if len(pending_tasks) == 0 and current_task is None \
+    if len(pending_tasks) == 0 and not scheduled and current_task is None \
             and "epoll.poll(timeout, max_ev)" in loop_thread_stack_trace.strip().split("\n")[-1]:
         log.warning("Event loop hangs in epoll selector without any tasks pending. "
-                    "This is probably a python bug (https://bugs.python.org/issue29780).")
+                    "Sending SIGINT to event loop thread...")
+        try:
+            signal.pthread_kill(loop_thread.ident, signal.SIGINT)
+            siginfo = signal.sigtimedwait([signal.SIGINT], 0)
+            if siginfo:
+                log.debug("Ignoring signal %s delivered to this thread instead of event loop thread...", siginfo)
+        except InterruptedError:
+            log.debug("Ignoring InterruptedError delivered to this thread instead of event loop thread...")
+            pass
 
 
 def dump_thread_stack(loop_thread):
