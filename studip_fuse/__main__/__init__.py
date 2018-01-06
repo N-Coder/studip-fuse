@@ -18,10 +18,9 @@ class LoggerWriter:
         self.level = level
         self.old = old
         self._local = threading.local()
-        self._local.writing = False
 
     def write(self, message):
-        if self._local.writing:
+        if getattr(self._local, "writing", False):
             return
         self._local.writing = True
         try:
