@@ -10,6 +10,7 @@ from typing import Any, Dict, List, Optional, Set, Tuple, Type
 import attr
 from cached_property import cached_property
 
+from studip_api.downloader import Download
 from studip_api.model import Course, File, Folder, Semester
 from studip_fuse.cache import cached_task
 from studip_fuse.path.path_util import Charset, EscapeMode, escape_file_name, get_format_segment_requires, \
@@ -159,10 +160,9 @@ class VirtualPath(object):
         #     d["st_nlink"] = len(self.list_contents().result())
         return d
 
-    async def open_file(self, flags):
+    async def open_file(self, flags) -> Download:
         assert not self.is_folder
-        path = await self.session.download_file_contents(self._file)
-        return os.open(path, flags)
+        return await self.session.download_file_contents(self._file)
 
     # private properties ###############################################################################################
 
