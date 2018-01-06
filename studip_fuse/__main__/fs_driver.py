@@ -5,13 +5,16 @@ import logging.handlers
 import os
 import signal
 import tempfile
+from asyncio import BaseEventLoop
 from stat import S_IFREG
 from threading import Thread
-from typing import List
+from typing import Dict, List
 
 import attr
+from attr import Factory
 from fuse import LoggingMixIn, Operations, fuse_get_context
 
+from studip_api.downloader import Download
 from studip_fuse.__main__.main_loop import main_loop
 from studip_fuse.__main__.thread_util import await_loop_thread_shutdown
 from studip_fuse.cache import cached_task
@@ -30,9 +33,10 @@ class FUSEView(Operations):
 
     loop_future = attr.ib(init=False, default=None)
     loop_thread = attr.ib(init=False, default=None)
-    loop = attr.ib(init=False, default=None)
+    loop = attr.ib(init=False, default=None)  # type: BaseEventLoop
     session = attr.ib(init=False, default=None)
     root_rp = attr.ib(init=False, default=None)  # type: RealPath
+    open_files = attr.ib(init=False, default=Factory(dict))  # type: Dict[str, Download]
 
     def init(self, path):
         try:
@@ -122,16 +126,24 @@ class FUSEView(Operations):
         if resolved_real_file.is_folder:
             raise OSError(errno.EISDIR)
         else:
-            return self.schedule_async(resolved_real_file.open_file(flags)).result()
+            download = self.schedule_async(resolved_real_file.open_file(flags)).result()
+            fileno = os.open(download.local_path, flags)
+            self.open_files[fileno] = download
+            return fileno
 
     def read(self, path, length, offset, fh):
-        os.lseek(fh, offset, os.SEEK_SET)  # TODO make lazy
+        download = self.open_files.get(fh, None)
+        if download:
+            self.schedule_async(download.await_readable(offset, length)).result()
+
+        os.lseek(fh, offset, os.SEEK_SET)
         return os.read(fh, length)
 
     def flush(self, path, fh):
         return os.fsync(fh)
 
     def release(self, path, fh):
+        self.open_files.pop(fh, None)
         return os.close(fh)
 
     def fsync(self, path, fdatasync, fh):
