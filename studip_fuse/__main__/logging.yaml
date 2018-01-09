@@ -24,6 +24,11 @@ handlers:
     stream: ext://sys.stdout
     formatter: console
 
+  console-err:
+    class: logging.StreamHandler
+    stream: ext://sys.stderr
+    formatter: console
+
 loggers:
   studip_fuse.async_cache:
     level: INFO
@@ -40,6 +45,13 @@ loggers:
 
   studip_fuse.stderr:
     handlers: [syslog, file]
+    propagate: False
+
+  # fuse-debug prints C stderr, so print output from log-mixin to same stream
+  # and don't send too long messages to syslog
+  studip_fuse.fs_driver.ops:
+    level: INFO
+    handlers: [console-err]
     propagate: False
 
 root:
