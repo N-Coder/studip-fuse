@@ -1,6 +1,7 @@
 import re
 from enum import IntEnum
 from os.path import normpath
+from string import Formatter
 from typing import Set, Type
 
 from studip_api.model import Course, File, Semester
@@ -12,6 +13,7 @@ PUNCTUATION_WHITESPACE_RE = re.compile(r"[ _/.,;:\-#'+*~!^\"$%&()[\]}{\\?<>|]+")
 NON_ASCII_RE = re.compile(r"[^\x00-\x7f]+")
 NON_IDENTIFIER_RE = re.compile(r"[^A-Za-z0-9_]+")
 FS_SPECIAL_CHARS_RE = re.compile(r"[/:]+")
+FORMATTER = Formatter()
 EscapeMode = IntEnum("EscapeMode", "Similar Typeable CamelCase SnakeCase")
 Charset = IntEnum("Charset", "Unicode Ascii Identifier")
 
@@ -96,15 +98,17 @@ def __test_paths():
 
 
 def get_format_segment_requires(format_segment) -> Set[Type]:
-    # FIXME breaks when value formatting options are used
     requirements = set()
-    if any(t in format_segment for t in ["{semester}", "{semester-lexical}", "{semester-lexical-short}"]):
-        requirements.add(Semester)
-    if any(t in format_segment for t in ["{course}", "{course-abbrev}", "{course-id}", "{type}", "{type-abbrev}"]):
-        requirements.add(Course)
-    if any(t in format_segment for t in ["{path}", "{short-path}", "{id}", "{name}", "{description}", "{author}"]):
-        requirements.add(File)
-    if "{time}" in format_segment and not requirements:  # any info can provide a time
-        # TODO time may differ between file and parent folder, which will break path logic
-        requirements.add(Semester)
+    for (literal_text, field_name, format_spec, conversion) in FORMATTER.parse(format_segment):
+        if field_name in ["semester", "semester-lexical", "semester-lexical-short"]:
+            requirements.add(Semester)
+        elif field_name in ["course", "course-abbrev", "course-id", "type", "type-abbrev"]:
+            requirements.add(Course)
+        elif field_name in ["path", "short-path", "id", "name", "description", "author"]:
+            requirements.add(File)
+        elif field_name == "time" and not requirements:  # any info can provide a time
+            # TODO time may differ between file and parent folder, which will break path logic
+            requirements.add(Semester)
+        else:
+            raise ValueError("Unknown format field name '%s' in format string '%s'" % (field_name, format_segment))
     return requirements
