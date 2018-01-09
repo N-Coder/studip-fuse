@@ -7,6 +7,7 @@ import pkg_resources
 import yaml
 
 from studip_fuse.__main__.cmd_util import parse_args
+from studip_fuse.__main__.fs_driver import FixedFUSE
 
 
 def excepthook(type, value, tb):
@@ -59,11 +60,10 @@ def main():
         import os
         os.makedirs(args.cache, exist_ok=True)
 
-        from studip_fuse.__main__.fs_driver import LoggingFUSEView, FUSEView
+        from studip_fuse.__main__.fs_driver import FUSEView
         if args.debug_fuse:
-            fuse_ops = LoggingFUSEView(args, http_args, fuse_args)
-        else:
-            fuse_ops = FUSEView(args, http_args, fuse_args)
+            logging.getLogger("studip_fuse.fs_driver.ops").setLevel(logging.DEBUG)
+        fuse_ops = FUSEView(args, http_args, fuse_args)
 
         if args.pwfile == "-":
             from getpass import getpass
@@ -82,7 +82,9 @@ def main():
         logging.debug("Starting FUSE driver to mount at %s (uid=%s, gid=%s, pid=%s, python pid=%s)", args.mount,
                       *fuse_get_context(), os.getpid())
         # This calls fork if args.foreground == False (https://bugs.python.org/issue21998)
-        FUSE(fuse_ops, args.mount, debug=fuse_args.pop("debug_fuse"), **fuse_args)
+        FixedFUSE(fuse_ops, args.mount, debug=fuse_args.pop("debug_fuse"), **fuse_args)
+    except SystemExit:
+        pass
     except:
         logging.error("main() function quit exceptionally", exc_info=True)
     finally:

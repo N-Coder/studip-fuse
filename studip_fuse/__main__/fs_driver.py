@@ -1,9 +1,10 @@
 import asyncio
 import concurrent.futures
 import errno
+import inspect
 import logging.handlers
 import os
-import signal
+import pprint
 import tempfile
 from asyncio import BaseEventLoop
 from stat import S_IFREG
@@ -11,8 +12,9 @@ from threading import Thread
 from typing import Dict, List
 
 import attr
+from aiohttp import ServerDisconnectedError
 from attr import Factory
-from fuse import LoggingMixIn, Operations, fuse_get_context
+from fuse import FUSE, FuseOSError, fuse_get_context
 
 from studip_api.downloader import Download
 from studip_fuse.__main__.main_loop import main_loop
@@ -22,11 +24,62 @@ from studip_fuse.cache.async_cache import clear_caches
 from studip_fuse.path import RealPath, VirtualPath, path_name
 
 log = logging.getLogger("studip_fuse.fs_driver")
+log_ops = logging.getLogger("studip_fuse.fs_driver.ops")
 
 
-# https://www.cs.hmc.edu/~geoff/classes/hmc.cs135.201001/homework/fuse/fuse_doc.html
+def fuse_exit():
+    from fuse import _libfuse, c_void_p
+
+    fuse_ptr = c_void_p(_libfuse.fuse_get_context().contents.fuse)
+    _libfuse.fuse_exit(fuse_ptr)
+
+    # alternative without directly invoking native code
+    # os.kill(os.getpid(), signal.SIGINT)
+
+
+class FixedFUSE(FUSE):
+    def __init__(self, operations: "FUSEView", mountpoint, **kwargs):
+        self.__critical_exception = None
+        super().__init__(operations, mountpoint, **kwargs)
+        if self.__critical_exception:
+            raise self.__critical_exception
+
+    def _wrapper(self, func, *args, **kwargs):
+        try:
+            if func.__name__ == "init":
+                # init may not fail, as its return code is just stored as private_data field of struct fuse_context
+                return func(*args, **kwargs) or 0
+
+            else:
+                try:
+                    return func(*args, **kwargs) or 0
+                except (TimeoutError, asyncio.TimeoutError):
+                    return -errno.ETIMEDOUT
+                except ServerDisconnectedError:
+                    return -errno.ECONNRESET
+                except OSError as e:
+                    return -(e.errno or errno.EINVAL)
+                except Exception:
+                    log.error("Uncaught exception from FUSE operation %s, returning errno.EFAULT.",
+                              func.__name__, exc_info=True)
+                    return -errno.EINVAL
+
+        except BaseException as e:
+            self.__critical_exception = e
+            log.critical("Uncaught critical exception from FUSE operation %s, aborting.",
+                         func.__name__, exc_info=True)
+            # the raised exception (even SystemExit) will be caught by FUSE potentially causing SIGSEGV,
+            # so tell system to stop/interrupt FUSE
+            fuse_exit()
+            return -errno.EFAULT
+
+
+# FUSE Doc:             https://libfuse.github.io/doxygen/files.html
+# FUSE Explanation:     https://lastlog.de/misc/fuse-doc/doc/html/
+# FUSE Functions Info:  https://www.cs.hmc.edu/~geoff/classes/hmc.cs135.201001/homework/fuse/fuse_doc.html
+# Linux System Errors:  http://www-numi.fnal.gov/offline_software/srt_public_context/WebDocs/Errors/unix_system_errors.html
 @attr.s(hash=False)
-class FUSEView(Operations):
+class FUSEView(object):
     args = attr.ib()
     http_args = attr.ib()
     fuse_args = attr.ib()
@@ -38,28 +91,50 @@ class FUSEView(Operations):
     root_rp = attr.ib(init=False, default=None)  # type: RealPath
     open_files = attr.ib(init=False, default=Factory(dict))  # type: Dict[str, Download]
 
-    def init(self, path):
+    @staticmethod
+    def saferepr(val):
+        val = pprint.saferepr(val)
+        if len(val) > 2000:
+            val = val[:1985] + "[...]" + val[-10:]
+        return val
+
+    def __call__(self, op, path, *args):
+        if log_ops.isEnabledFor(logging.DEBUG):
+            signature = inspect.signature(getattr(self, op))
+            bound_args = signature.bind(path, *args)
+            bound_args.apply_defaults()
+            log_ops.debug('-> %s %s %s', op, path, self.saferepr(bound_args.arguments))
+
+        ret = '[Unhandled Exception]'
         try:
-            log.info("Mounting at %s (uid=%s, gid=%s, pid=%s, python pid=%s)", path, *fuse_get_context(),
-                     os.getpid())
-
-            self.loop_future = concurrent.futures.Future()
-            self.loop_thread = Thread(target=main_loop, args=(self.args, self.http_args, self.loop_future),
-                                      name="aio event loop", daemon=True)
-            self.loop_thread.start()
-            log.debug("Event loop thread started, waiting for session initialization")
-            self.loop, self.session = self.loop_future.result()
-
-            vp = VirtualPath(session=self.session, path_segments=[], known_data={}, parent=None,
-                             next_path_segments=self.args.format.split("/"))
-            self.root_rp = RealPath(parent=None, generating_vps={vp})
-            log.debug("Session and virtual FS initialized")
-
-            log.info("Mounting complete")
-        except:
-            # the raised exception (even SystemExit) would be caught by FUSE, so tell system to interrupt FUSE
-            os.kill(os.getpid(), signal.SIGINT)
+            if not hasattr(self, op):
+                raise FuseOSError(errno.ENOSYS)
+            ret = getattr(self, op)(path, *args)
+            return ret
+        except OSError as e:
+            ret = str(e)
             raise
+        finally:
+            if log_ops.isEnabledFor(logging.DEBUG):
+                log_ops.debug('<- %s %s', op, self.saferepr(ret))
+
+    def init(self, path):
+        log.info("Mounting at %s (uid=%s, gid=%s, pid=%s, python pid=%s)", path, *fuse_get_context(),
+                 os.getpid())
+
+        self.loop_future = concurrent.futures.Future()
+        self.loop_thread = Thread(target=main_loop, args=(self.args, self.http_args, self.loop_future),
+                                  name="aio event loop", daemon=True)
+        self.loop_thread.start()
+        log.debug("Event loop thread started, waiting for session initialization")
+        self.loop, self.session = self.loop_future.result()
+
+        vp = VirtualPath(session=self.session, path_segments=[], known_data={}, parent=None,
+                         next_path_segments=self.args.format.split("/"))
+        self.root_rp = RealPath(parent=None, generating_vps={vp})
+        log.debug("Session and virtual FS initialized")
+
+        log.info("Mounting complete")
 
     def destroy(self, path):
         log.info("Unmounting from %s (uid=%s, gid=%s, pid=%s, python pid=%s)", path, *fuse_get_context(),
@@ -148,7 +223,3 @@ class FUSEView(Operations):
 
     def fsync(self, path, fdatasync, fh):
         return self.flush(path, fh)
-
-
-class LoggingFUSEView(FUSEView, LoggingMixIn):
-    pass
