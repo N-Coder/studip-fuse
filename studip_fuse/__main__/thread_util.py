@@ -4,6 +4,7 @@ import signal
 import sys
 import threading
 import traceback
+from collections import defaultdict
 
 from more_itertools import one
 
@@ -71,3 +72,16 @@ def dump_thread_stack(loop_thread):
     log.info("Waiting for loop thread to abort initialization...")
     if log.isEnabledFor(logging.DEBUG):
         log.debug("Thread stack trace:\n %s", format_stack(sys._current_frames()[loop_thread.ident]))
+
+
+class ThreadSafeDefaultDict(defaultdict):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.__lock = threading.Lock()
+
+    def __missing__(self, key):
+        with self.__lock:
+            if key in self:
+                return super().__getitem__(key)
+            else:
+                return super().__missing__(key)

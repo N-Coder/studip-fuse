@@ -8,7 +8,7 @@ import pprint
 import tempfile
 from asyncio import BaseEventLoop
 from stat import S_IFREG
-from threading import Thread
+from threading import Lock, Thread
 from typing import Dict, List
 
 import attr
@@ -18,7 +18,7 @@ from fuse import FUSE, FuseOSError, fuse_get_context
 
 from studip_api.downloader import Download
 from studip_fuse.__main__.main_loop import main_loop
-from studip_fuse.__main__.thread_util import await_loop_thread_shutdown
+from studip_fuse.__main__.thread_util import ThreadSafeDefaultDict, await_loop_thread_shutdown
 from studip_fuse.cache import cached_task
 from studip_fuse.cache.async_cache import clear_caches
 from studip_fuse.path import RealPath, VirtualPath, path_name
@@ -206,13 +206,16 @@ class FUSEView(object):
             self.open_files[fileno] = download
             return fileno
 
+    read_locks = attr.ib(init=False, repr=False, default=Factory(lambda: ThreadSafeDefaultDict(Lock)))
+
     def read(self, path, length, offset, fh):
         download = self.open_files.get(fh, None)
         if download:
             self.schedule_async(download.await_readable(offset, length)).result()
 
-        os.lseek(fh, offset, os.SEEK_SET)
-        return os.read(fh, length)
+        with self.read_locks[fh]:
+            os.lseek(fh, offset, os.SEEK_SET)
+            return os.read(fh, length)
 
     def flush(self, path, fh):
         return os.fsync(fh)
