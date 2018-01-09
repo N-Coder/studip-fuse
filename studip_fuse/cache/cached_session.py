@@ -32,6 +32,8 @@ class CachedStudIPSession(StudIPSession):
 
     @cached_task()
     async def download_file_contents(self, studip_file, local_dest=None, chunk_size=1024 * 256):
+        # FIXME failed Downloads will stay in Cache
+
         if not local_dest:
             local_dest = path.join(self.cache_dir, studip_file.id)
 
