@@ -1,12 +1,11 @@
 import asyncio
-import concurrent.futures
 import functools
 import inspect
 import logging
 import sys
 from datetime import datetime
 from threading import current_thread
-from typing import Any, Dict, NamedTuple, Union
+from typing import Any, Dict, NamedTuple
 
 from cached_property import cached_property
 
@@ -87,7 +86,7 @@ class AsyncTaskCache(DecoratorClass):
         self.__hits = 0
         self.__misses = 0
 
-        self.__cache = {}  # type: Dict[Any, Union[concurrent.futures.Future, asyncio.Future]]
+        self.__cache = {}  # type: Dict[Any, asyncio.Future]
 
     @cached_property
     def __lock(self):
@@ -170,7 +169,10 @@ async def clear_caches():
 
 
 # TODO add ttl-based clearing
-# TODO check Handling of exceptions
+# TODO check Handling of exceptions (ServerDisconnectedError, TimeoutError, ...)
+# TODO allow custom cache validation, because... (see below)
+# FIXME cached results containing/wrapping a failed future shouldn't be kept in cache
+# TODO make partial constructors so that individual classes can also be used as decorators
 def cached_task():
     def wrapper(user_func):
         async_cache_log.debug(
