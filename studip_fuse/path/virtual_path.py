@@ -140,9 +140,7 @@ class VirtualPath(object):
                 for f in files]
 
     def access(self, mode):
-        pass  # TODO implement
-        # if not os.access(sub_vps[0].cache_path, mode):
-        #     raise FuseOSError(errno.EACCES)
+        pass
 
     def getattr(self):
         d = dict(st_ino=hash(self.partial_path), st_mode=(S_IFDIR if self.is_folder else S_IFREG) | 0o755,
@@ -156,8 +154,6 @@ class VirtualPath(object):
                 log.warning("Size of file %s unknown, because the value wasn't loaded from Stud.IP", self._file)
             else:
                 d["st_size"] = self._file.size
-        # elif self.list_contents().done(): #FIXME wrong thread
-        #     d["st_nlink"] = len(self.list_contents().result())
         return d
 
     async def open_file(self, flags) -> Download:
@@ -236,8 +232,6 @@ class VirtualPath(object):
                 "name": self.__escape_file(self._file.name),
                 "description": self.__escape_file(self._file.description or ""),
                 "author": self.__escape_file(self._file.author or ""),
-                # "ext": extension, #TODO add separate file extension, guess from mime if needed
-                # "descr-no-ext": self.__escape_file(descr_no_ext),
             })
         return tokens
 
