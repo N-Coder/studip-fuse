@@ -107,7 +107,6 @@ def get_format_segment_requires(format_segment) -> Set[Type]:
         elif field_name in ["path", "short-path", "id", "name", "description", "author"]:
             requirements.add(File)
         elif field_name == "time" and not requirements:  # any info can provide a time
-            # TODO time may differ between file and parent folder, which will break path logic
             requirements.add(Semester)
         else:
             raise ValueError("Unknown format field name '%s' in format string '%s'" % (field_name, format_segment))

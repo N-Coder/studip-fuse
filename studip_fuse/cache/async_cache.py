@@ -168,10 +168,6 @@ async def clear_caches():
     return msg
 
 
-# TODO add ttl-based clearing
-# TODO check Handling of exceptions (ServerDisconnectedError, TimeoutError, ...)
-# TODO allow custom cache validation, because... (see below)
-# FIXME cached results containing/wrapping a failed future shouldn't be kept in cache
 # TODO make partial constructors so that individual classes can also be used as decorators
 def cached_task():
     def wrapper(user_func):

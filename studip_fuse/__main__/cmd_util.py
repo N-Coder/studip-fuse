@@ -44,12 +44,13 @@ def parse_args():
                            default=30, type=float)
     http_opts.add_argument("--keepalive-timeout", action="store",
                            help="timeout for connection reusing after releasing in seconds", default=60, type=float)
-    http_opts.add_argument("--limit", action="store", help="total number simultaneous connections", default=10,
+    http_opts.add_argument("--limit", action="store", help="total number of simultaneous connections", default=10,
                            type=int)
     http_opts.add_argument("--force-close", action="store_true", help="disable HTTP keep-alive")
     debug_aio = http_opts.add_argument("--debug-aio", help="turn on aiohttp debug logging", action="store_true")
 
-    parser = argparse.ArgumentParser(description="Stud.IP Fuse", formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    parser = argparse.ArgumentParser(description="Stud.IP FUSE driver",
+                                     formatter_class=argparse.ArgumentDefaultsHelpFormatter,
                                      parents=[opts_parser])
     parser.add_argument("user", help="Stud.IP username")
     parser.add_argument("mount", help="path to mount point")

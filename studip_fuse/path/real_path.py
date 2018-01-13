@@ -1,6 +1,6 @@
 import logging
 from asyncio import gather
-from typing import Callable, Dict, List, Optional, Set
+from typing import Dict, List, Optional, Set
 
 import attr
 from cached_property import cached_property
@@ -35,19 +35,6 @@ class RealPath(object):
     @cached_property
     def is_root(self) -> bool:
         return not self.parent
-
-    async def iterate_hierarchically(self, visitor: Callable[['RealPath', int], bool], level: int = 1):
-        contents = await self.list_contents()
-        iter_log.debug("Found %s unique children of '%s', recursing...", len(contents), self)
-        futures = []
-        for file in contents:
-            go_deeper = visitor(file, level)  # TODO cancellation / StopIteration?
-            if go_deeper and self.is_folder:
-                futures.append(
-                    file.iterate_hierarchically(visitor, level + 1)
-                )
-        if futures:
-            await gather(*futures)
 
     @cached_task()
     async def resolve(self, rel_path) -> Optional['RealPath']:
@@ -108,11 +95,12 @@ class RealPath(object):
     def access(self, mode):
         for vp in self.generating_vps:
             vp.access(mode)
-        return 0  # TODO reduce
 
     def getattr(self):
         st = {}
-        for vp in self.generating_vps:  # TODO sort
+        # if multiple Folders that generate the same VirtualPath have different attrs,
+        # the actual attrs of the final RealPath may be non-deterministic
+        for vp in self.generating_vps:
             st.update(vp.getattr())
         return {key: val for key, val in st.items() if key in
                 ('st_atime', 'st_ctime', 'st_gid', 'st_mode', 'st_mtime', 'st_nlink', 'st_size', 'st_uid')}
