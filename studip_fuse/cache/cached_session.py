@@ -1,4 +1,3 @@
-import asyncio
 import time
 from os import path
 from stat import S_ISREG
@@ -8,16 +7,7 @@ import attr
 
 from studip_api.downloader import Download
 from studip_api.session import StudIPSession, log
-from studip_fuse.cache import cached_future_validator, cached_task
-
-
-def cached_download_validator(key, value):
-    if asyncio.isfuture(value) and value.done() and not value.exception() and not value.cancelled():
-        result = value.result()
-        if isinstance(result, Download) and cached_future_validator(key, result.completed) is None:
-            return None
-
-    return cached_future_validator(key, value)
+from studip_fuse.cache import cached_download, cached_task
 
 
 @attr.s(hash=False)
@@ -40,7 +30,7 @@ class CachedStudIPSession(StudIPSession):
     async def get_folder_files(self, folder):
         return await super().get_folder_files(folder)
 
-    @cached_task(cached_value_validator=cached_download_validator)
+    @cached_download()
     async def download_file_contents(self, studip_file, local_dest=None, chunk_size=1024 * 256):
         if not local_dest:
             local_dest = path.join(self.cache_dir, studip_file.id)
