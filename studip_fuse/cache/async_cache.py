@@ -9,6 +9,9 @@ from typing import Any, Dict, NamedTuple
 
 from cached_property import cached_property
 
+__all__ = ["CacheInfo", "CallInfo", "CoroCallCounter", "CoroCallCounterClass", "CoroWrapper", "CoroWrapperClass",
+           "cached_future_validator", "AsyncTaskCache", "AsyncTaskCacheClass", "clear_caches", "cached_task"]
+
 async_cache_log = logging.getLogger("studip_fuse.async_cache")
 
 CacheInfo = NamedTuple("CacheInfo", [("hits", int), ("misses", int), ("cache_len", int), ])
@@ -28,7 +31,11 @@ class DecoratorClass(object):
         return functools.partial(self, obj)
 
 
-class CoroCallCounter(DecoratorClass):
+def CoroCallCounter():
+    return CoroCallCounterClass
+
+
+class CoroCallCounterClass(DecoratorClass):
     def __init__(self, user_func):
         super().__init__(user_func)
 
@@ -70,7 +77,11 @@ class CoroCallCounter(DecoratorClass):
             raise
 
 
-class CoroWrapper(DecoratorClass):
+def CoroWrapper(wrap_with):
+    return functools.partial(CoroCallCounterClass, wrap_with=wrap_with)
+
+
+class CoroWrapperClass(DecoratorClass):
     def __init__(self, user_func, wrap_with):
         super().__init__(user_func)
         self.__wrap_with = wrap_with
@@ -79,9 +90,30 @@ class CoroWrapper(DecoratorClass):
         return self.__wrap_with(self.__wrapped__(*args, **kwargs))
 
 
-class AsyncTaskCache(DecoratorClass):
-    def __init__(self, user_func):
+def cached_future_validator(key, val):
+    if asyncio.isfuture(val):
+        if not val.done():
+            # use future result
+            return val
+        elif val.cancelled() or val.exception():
+            # don't reuse failed tasks
+            return None
+        else:
+            # reuse result of successful tasks
+            return val
+    else:
+        assert val is None
+        return val
+
+
+def AsyncTaskCache(cached_value_validator=None):
+    return functools.partial(AsyncTaskCacheClass, cached_value_validator)
+
+
+class AsyncTaskCacheClass(DecoratorClass):
+    def __init__(self, user_func, cached_value_validator=None):
         super().__init__(user_func)
+        self.cached_value_validator = cached_value_validator or cached_future_validator
 
         self.__hits = 0
         self.__misses = 0
@@ -105,20 +137,7 @@ class AsyncTaskCache(DecoratorClass):
         return self.__get_cached_task(*args, **kwargs)
 
     def __get_valid_cache_value(self, key):
-        val = self.__cache.get(key, None)
-        if asyncio.isfuture(val):
-            if not val.done():
-                # use future result
-                return val
-            elif val.cancelled() or val.exception():
-                # don't reuse failed tasks
-                return None
-            else:
-                # reuse result of successful tasks
-                return val
-        else:
-            assert val is None
-            return val
+        return self.cached_value_validator(key, self.__cache.get(key, None))
 
     async def __get_cached_task(self, *args, **kwargs):
         from functools import _make_key as make_key
@@ -168,16 +187,15 @@ async def clear_caches():
     return msg
 
 
-# TODO make partial constructors so that individual classes can also be used as decorators
-def cached_task():
+def cached_task(cached_value_validator=None):
     def wrapper(user_func):
         async_cache_log.debug(
             "Scheduling future execution of coroutine (result of calling) %s and caching successful executions",
             user_func)
-        wrapped = CoroCallCounter(user_func)
+        wrapped = CoroCallCounterClass(user_func)
 
-        wrapped = CoroWrapper(wrapped, asyncio.ensure_future)
-        wrapped = AsyncTaskCache(wrapped)
+        wrapped = CoroWrapperClass(wrapped, asyncio.ensure_future)
+        wrapped = AsyncTaskCacheClass(wrapped, cached_value_validator)
         cached_tasks.append(wrapped)
         return wrapped
 
