@@ -1,3 +1,4 @@
+import asyncio
 import time
 from os import path
 from stat import S_ISREG
@@ -11,10 +12,12 @@ from studip_fuse.cache import cached_future_validator, cached_task
 
 
 def cached_download_validator(key, value):
-    if isinstance(value, Download):
-        return cached_future_validator(key, value.completed)
-    else:
-        return cached_future_validator(key, value)
+    if asyncio.isfuture(value) and value.done() and not value.exception() and not value.cancelled():
+        result = value.result()
+        if isinstance(result, Download) and cached_future_validator(key, result.completed) is None:
+            return None
+
+    return cached_future_validator(key, value)
 
 
 @attr.s(hash=False)

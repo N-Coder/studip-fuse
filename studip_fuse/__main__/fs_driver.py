@@ -55,6 +55,8 @@ class FixedFUSE(FUSE):
                     return func(*args, **kwargs) or 0
                 except (TimeoutError, asyncio.TimeoutError):
                     return -errno.ETIMEDOUT
+                except concurrent.futures.CancelledError:
+                    return -errno.ECANCELED
                 except ServerDisconnectedError:
                     return -errno.ECONNRESET
                 except OSError as e:
