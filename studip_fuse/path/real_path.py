@@ -78,6 +78,7 @@ class RealPath(object):
 
         async def __update_contents_map(no_progress_vp):
             for sub_vp in await no_progress_vp.list_contents():
+                assert sub_vp != no_progress_vp, "no_progress_vp %s returned self amongst its contents!" % no_progress_vp
                 contents.setdefault(sub_vp.partial_path, set()).add(sub_vp)
 
         # skip paths that make no progress
