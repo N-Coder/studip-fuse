@@ -1,14 +1,14 @@
 import logging
-import logging
 import os
 from asyncio import as_completed
 from datetime import datetime
 from os import path
 from stat import S_IFDIR, S_IFREG
-from typing import Any, Dict, List, Optional, Set, Tuple, Type
+from typing import Any, Dict, List, Optional, Set, Tuple, Type, Union
 
 import attr
 from cached_property import cached_property
+from frozendict import frozendict
 
 from studip_api.downloader import Download
 from studip_api.model import Course, File, Folder, Semester
@@ -22,10 +22,10 @@ log = logging.getLogger("studip_fuse.virtual_path")
 @attr.s(frozen=True, str=False, repr=False, hash=False)
 class VirtualPath(object):
     session = attr.ib()  # type: 'StudIPSession'
-    path_segments = attr.ib()  # type: List[str]
-    known_data = attr.ib()  # type: Dict[Type, Any]
+    path_segments = attr.ib(convert=tuple)  # type: Tuple[str]
+    known_data = attr.ib(convert=frozendict)  # type: Union[Dict[Type, Any], frozendict]
     parent = attr.ib()  # type: Optional['VirtualPath']
-    next_path_segments = attr.ib()  # type: List[str]
+    next_path_segments = attr.ib(convert=tuple)  # type: Tuple[str]
 
     # __init__  ########################################################################################################
 
@@ -47,7 +47,7 @@ class VirtualPath(object):
         path_segments = self.path_segments
         if self._loop_over_path and self._file:
             # preview the file path we're generating in the loop
-            path_segments = path_segments + [path_head(self.next_path_segments)]
+            path_segments = path_segments + (path_head(self.next_path_segments),)
         partial = "/".join(path_segments).format(**self._known_tokens)
         partial = normalize_path(partial)
         return partial
@@ -262,7 +262,7 @@ class VirtualPath(object):
         assert self.is_folder
         args = dict(session=self.session, parent=self, known_data=self.known_data)
         if increment_path_segments:
-            args.update(path_segments=self.path_segments + [path_head(self.next_path_segments)],
+            args.update(path_segments=self.path_segments + (path_head(self.next_path_segments),),
                         next_path_segments=path_tail(self.next_path_segments))
         else:
             args.update(path_segments=self.path_segments,
@@ -278,7 +278,7 @@ class VirtualPath(object):
     # utils  ###########################################################################################################
 
     def __hash__(self):
-        return hash(self.partial_path)
+        return hash((self.path_segments, self.known_data, self.parent, self.next_path_segments))
 
     def __str__(self):
         path_segments = [seg.format(**self._known_tokens) for seg in self.path_segments]
