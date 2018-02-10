@@ -5,13 +5,15 @@ import logging
 import sys
 from datetime import datetime
 from threading import current_thread
+from time import time
 from typing import Any, Dict, NamedTuple
 
 from cached_property import cached_property
 
 from studip_api.downloader import Download
 
-__all__ = ["CacheInfo", "CallInfo", "CoroCallCounter", "AsyncTaskCache", "DownloadTaskCache", "clear_caches", "cached_task", "cached_download"]
+__all__ = ["CacheInfo", "CallInfo", "CoroCallCounter", "AsyncTaskCache", "AsyncTimedTaskCache",
+           "DownloadTaskCache", "clear_caches", "cached_task", "cached_download"]
 
 async_cache_log = logging.getLogger("studip_fuse.async_cache")
 
@@ -30,6 +32,9 @@ class DecoratorClass(object):
     def __get__(self, obj, type=None):
         # see https://stackoverflow.com/questions/47433768#comment81822552_47433786
         return functools.partial(self, obj)
+
+    def __str__(self):
+        return "<%s %s>" % (self.__class__.__name__, self.__wrapped__)
 
 
 class CoroCallCounter(DecoratorClass):
@@ -75,7 +80,11 @@ class CoroCallCounter(DecoratorClass):
 
 
 class AsyncTaskCache(DecoratorClass):
-    CACHE_SENTINEL = object()
+    class __Sentinel(object):
+        def __str__(self):
+            return "<AsyncTaskCache.CACHE_SENTINEL>"
+
+    CACHE_SENTINEL = __Sentinel()
 
     def __init__(self, user_func):
         super().__init__(user_func)
@@ -99,16 +108,18 @@ class AsyncTaskCache(DecoratorClass):
             self.__hits = self.__misses = 0
 
     def __call__(self, *args, **kwargs):
-        return self.__get_cached_task(*args, **kwargs)
+        from functools import _make_key as make_key
+        return self._get_cached_task(make_key(args, kwargs, typed=False), args, kwargs)
 
-    def _get_valid_cache_value(self, key):
+    def _get_valid_cache_value(self, key, **kwargs):
         val = self.__cache.get(key, None)
-        if self._is_valid_cache_value(key, val):
+        if self._is_valid_cache_value(key, val, **kwargs):
             return val
         else:
             return self.CACHE_SENTINEL
 
-    def _is_valid_cache_value(self, key, val):
+    def _is_valid_cache_value(self, key, val, **kwargs):
+        assert not kwargs, "Didn't expect kwargs %s" % kwargs
         if asyncio.isfuture(val):
             if not val.done():
                 # use future result
@@ -119,6 +130,8 @@ class AsyncTaskCache(DecoratorClass):
             else:
                 # reuse result of successful tasks
                 return True
+        elif val is self.CACHE_SENTINEL:
+            return False
         else:
             assert val is None, ("Expected result of invocation of user function %s to be a Task, but got '%s' of type %s" %
                                  (self.__wrapped__, val, val.__class__))
@@ -127,10 +140,7 @@ class AsyncTaskCache(DecoratorClass):
     def _create_new_cache_value(self, key, old_value, args, kwargs):
         return asyncio.ensure_future(self.__wrapped__(*args, **kwargs))
 
-    async def __get_cached_task(self, *args, **kwargs):
-        from functools import _make_key as make_key
-        key = make_key(args, kwargs, typed=False)
-
+    async def _get_cached_task(self, key, args, kwargs):
         res = self._get_valid_cache_value(key)
         if res is not self.CACHE_SENTINEL:
             self.__hits += 1
@@ -148,11 +158,38 @@ class AsyncTaskCache(DecoratorClass):
             return await res
 
 
+class AsyncTimedTaskCache(AsyncTaskCache):
+    def __init__(self, user_func):
+        super().__init__(user_func)
+        self.__cache_times = {}  # type: Dict[Any, int]
+        self.__cache_fallbacks = {}  # type: Dict[Any, asyncio.Future]
+        self.cache_timeout = 600  # type: int
+
+    def _get_fallback_value(self, key):
+        res = self._get_valid_cache_value(key, ignore_timeout=True)
+        if res is not self.CACHE_SENTINEL:
+            return res
+        return self.__cache_fallbacks.get(key, self.CACHE_SENTINEL)
+
+    def _create_new_cache_value(self, key, old_value, args, kwargs):
+        if self._is_valid_cache_value(key, old_value, ignore_timeout=True):
+            self.__cache_fallbacks[key] = old_value
+        value = super()._create_new_cache_value(key, old_value, args, kwargs)
+        self.__cache_times[key] = time()
+        return value
+
+    def _is_valid_cache_value(self, key, val, ignore_timeout=False, **kwargs):
+        if super()._is_valid_cache_value(key, val, **kwargs):
+            return ignore_timeout or self.__cache_times[key] - time() < self.cache_timeout
+        else:
+            return False
+
+
 class DownloadTaskCache(AsyncTaskCache):
-    def _is_valid_cache_value(self, key, value):
-        is_valid = super()._is_valid_cache_value(key, value)
+    def _is_valid_cache_value(self, key, value, **kwargs):
+        is_valid = super()._is_valid_cache_value(key, value, **kwargs)
         if is_valid and value.done() and isinstance(value.result(), Download):
-            return super()._is_valid_cache_value(key, value.result().completed)
+            return super()._is_valid_cache_value(key, value.result().completed, **kwargs)
         else:
             return is_valid  # not a Download or still in progress, rely on result of super method
 
@@ -190,7 +227,7 @@ async def clear_caches():
     return msg
 
 
-def cached_task(cache_class=AsyncTaskCache):
+def cached_task(cache_class=AsyncTimedTaskCache):
     def wrapper(user_func):
         async_cache_log.debug(
             "Scheduling future execution of coroutine (result of calling) %s and caching successful executions in %s",
