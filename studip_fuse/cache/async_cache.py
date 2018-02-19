@@ -9,11 +9,10 @@ from time import time
 from typing import Any, Dict, NamedTuple
 
 from cached_property import cached_property
-
 from studip_api.downloader import Download
 
 __all__ = ["CacheInfo", "CallInfo", "CoroCallCounter", "AsyncTaskCache", "AsyncTimedTaskCache",
-           "DownloadTaskCache", "clear_caches", "cached_task", "cached_download"]
+           "DownloadTaskCache", "cached_task", "cached_download"]
 
 async_cache_log = logging.getLogger("studip_fuse.async_cache")
 
@@ -27,6 +26,7 @@ class DecoratorClass(object):
         assert self.__wrapped__ == user_func
 
     def __getattr__(self, item):
+        # redirect to __wrapped__ if an attr is not found on self
         return getattr(self.__wrapped__, item)
 
     def __get__(self, obj, type=None):
@@ -85,9 +85,29 @@ class AsyncTaskCache(DecoratorClass):
             return "<AsyncTaskCache.CACHE_SENTINEL>"
 
     CACHE_SENTINEL = __Sentinel()
+    LAST_CACHE_CLEAR = datetime.now()
+    CACHED_TASKS = []
+
+    @classmethod
+    async def clear_all_caches(cls):
+        async_cache_log.warning("Clearing caches...")
+        msg = "Clearing cache of %s tasks. Last clear was %s s ago at %s.\n" % \
+              (len(cls.CACHED_TASKS), datetime.now() - cls.LAST_CACHE_CLEAR, cls.LAST_CACHE_CLEAR)
+
+        for task in cls.CACHED_TASKS:
+            msg += "Statistics for task %s:\n" \
+                   "\tCalls: %s\n" \
+                   "\tCache: %s\n" % (task.__name__, getattr(task, "call_info", lambda: "???")(), task.cache_info())
+            await task.clear_cache()
+
+        cls.LAST_CACHE_CLEAR = datetime.now()
+        msg = msg.strip()
+        async_cache_log.info(msg)
+        return msg
 
     def __init__(self, user_func):
         super().__init__(user_func)
+        self.__class__.CACHED_TASKS.append(self)
 
         self.__hits = 0
         self.__misses = 0
@@ -102,7 +122,7 @@ class AsyncTaskCache(DecoratorClass):
     def cache_info(self):
         return CacheInfo(self.__hits, self.__misses, len(self.__cache))
 
-    async def cache_clear(self):
+    async def clear_cache(self):
         async with self.__lock:
             self.__cache.clear()
             self.__hits = self.__misses = 0
@@ -133,8 +153,9 @@ class AsyncTaskCache(DecoratorClass):
         elif val is self.CACHE_SENTINEL:
             return False
         else:
-            assert val is None, ("Expected result of invocation of user function %s to be a Task, but got '%s' of type %s" %
-                                 (self.__wrapped__, val, val.__class__))
+            assert val is None, (
+                    "Expected result of invocation of user function %s to be a Task, but got '%s' of type %s" %
+                    (self.__wrapped__, val, val.__class__))
             return False
 
     def _create_new_cache_value(self, key, old_value, args, kwargs):
@@ -195,36 +216,14 @@ class DownloadTaskCache(AsyncTaskCache):
 
     def _create_new_cache_value(self, key, old_value, args, kwargs):
         if old_value is not self.CACHE_SENTINEL:
-            assert asyncio.isfuture(old_value) and old_value.done() and not old_value.exception() and not old_value.cancelled(), \
+            assert asyncio.isfuture(old_value) and old_value.done() \
+                   and not old_value.exception() and not old_value.cancelled(), \
                 "Can't create a new cached task when old task is in invalid state: %s" % old_value
             assert isinstance(old_value.result(), Download), \
                 "Expected result of old cached task to be a Download, but it was %s" % old_value.result()
             return asyncio.ensure_future(old_value.result().fork())
 
         return super()._create_new_cache_value(key, old_value, args, kwargs)
-
-
-last_cache_clear = datetime.now()
-cached_tasks = []
-
-
-async def clear_caches():
-    global last_cache_clear, cached_tasks
-
-    async_cache_log.warning("Clearing caches...")
-    msg = "Clearing cache of %s tasks. Last clear was %s s ago at %s.\n" % \
-          (len(cached_tasks), datetime.now() - last_cache_clear, last_cache_clear)
-
-    for task in cached_tasks:
-        msg += "Statistics for task %s:\n" \
-               "\tCalls: %s\n" \
-               "\tCache: %s\n" % (task.__name__, getattr(task, "call_info", lambda: "???")(), task.cache_info())
-        await task.cache_clear()
-
-    last_cache_clear = datetime.now()
-    msg = msg.strip()
-    async_cache_log.info(msg)
-    return msg
 
 
 def cached_task(cache_class=AsyncTimedTaskCache):
@@ -234,7 +233,6 @@ def cached_task(cache_class=AsyncTimedTaskCache):
             user_func, cache_class)
         wrapped = CoroCallCounter(user_func)
         wrapped = cache_class(wrapped)
-        cached_tasks.append(wrapped)
         return wrapped
 
     return wrapper

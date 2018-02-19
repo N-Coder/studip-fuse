@@ -15,12 +15,10 @@ import attr
 from aiohttp import ServerDisconnectedError
 from attr import Factory
 from fuse import FUSE, FuseOSError, fuse_get_context
-
 from studip_api.downloader import Download
 from studip_fuse.__main__.main_loop import main_loop
 from studip_fuse.__main__.thread_util import ThreadSafeDefaultDict, await_loop_thread_shutdown
-from studip_fuse.cache import cached_task
-from studip_fuse.cache.async_cache import clear_caches
+from studip_fuse.cache import AsyncTaskCache, cached_task
 from studip_fuse.path import RealPath, VirtualPath, path_name
 
 log = logging.getLogger("studip_fuse.fs_driver")
@@ -194,7 +192,7 @@ class FUSEView(object):
 
     def open(self, path, flags):
         if path == "/.clear_caches":
-            msg = self.schedule_async(clear_caches()).result()
+            msg = self.schedule_async(AsyncTaskCache.clear_all_caches()).result()
             fh, tmp_path = tempfile.mkstemp()
             os.write(fh, msg.encode())
             return fh
