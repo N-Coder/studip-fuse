@@ -6,24 +6,25 @@ import sys
 from datetime import datetime
 from threading import current_thread
 from time import time
-from typing import Any, Dict, NamedTuple
+from typing import Any, Dict
 
 from cached_property import cached_property
+from tabulate import tabulate
+
 from studip_api.downloader import Download
 
-__all__ = ["CacheInfo", "CallInfo", "CoroCallCounter", "AsyncTaskCache", "AsyncTimedTaskCache",
-           "DownloadTaskCache", "cached_task", "cached_download"]
+__all__ = ["CoroCallCounter", "AsyncTaskCache", "AsyncTimedTaskCache", "DownloadTaskCache", "cached_task",
+           "cached_download"]
 
 async_cache_log = logging.getLogger("studip_fuse.async_cache")
-
-CacheInfo = NamedTuple("CacheInfo", [("hits", int), ("misses", int), ("cache_len", int), ])
-CallInfo = NamedTuple("CallInfo", [("call_counter", int), ("pending", int), ("successful", int), ("failed", int), ])
 
 
 class DecoratorClass(object):
     def __init__(self, user_func):
         functools.update_wrapper(self, user_func)
         assert self.__wrapped__ == user_func
+        # the outermost wrapper will always be generated last, so it will be the last to (over)write its cell in the dict
+        self.__class__.DECORATORS[self.__class__.name_of_function(user_func)] = self
 
     def __getattr__(self, item):
         # redirect to __wrapped__ if an attr is not found on self
@@ -36,6 +37,31 @@ class DecoratorClass(object):
     def __str__(self):
         return "<%s %s>" % (self.__class__.__name__, self.__wrapped__)
 
+    def get_statistics(self):
+        return {}
+
+    # Class-Methods ####################################################################################################
+
+    DECORATORS = {}  # type: Dict[str, DecoratorClass]
+
+    @staticmethod
+    def name_of_function(func) -> str:
+        return func.__module__ + "." + getattr(func, "__qualname__", getattr(func, "__name__"))
+
+    @classmethod
+    def format_all_statistics(cls, decorators=None):
+        if not decorators:
+            decorators = cls.DECORATORS.values()
+        lines = []
+        for deco in decorators:
+            lines.append({
+                "decorator": str(deco),
+                # "class": fullname.replace(deco.__name__, ""),
+                # "name": deco.__name__,
+                **deco.get_statistics()
+            })
+        return tabulate(lines, headers="keys")
+
 
 class CoroCallCounter(DecoratorClass):
     def __init__(self, user_func):
@@ -45,9 +71,14 @@ class CoroCallCounter(DecoratorClass):
         self.__successful_calls = 0
         self.__failed_calls = 0
 
-    def call_info(self):
-        return CallInfo(self.__call_counter, (self.__call_counter - self.__successful_calls - self.__failed_calls),
-                        self.__successful_calls, self.__failed_calls)
+    def get_statistics(self):
+        return {
+            "call_counter": self.__call_counter,
+            "pending_calls": (self.__call_counter - self.__successful_calls - self.__failed_calls),
+            "successful_calls": self.__successful_calls,
+            "failed_calls": self.__failed_calls,
+            **super().get_statistics()
+        }
 
     def __call__(self, *args, **kwargs):
         return self.__schedule_task(*args, **kwargs)
@@ -86,19 +117,17 @@ class AsyncTaskCache(DecoratorClass):
 
     CACHE_SENTINEL = __Sentinel()
     LAST_CACHE_CLEAR = datetime.now()
-    CACHED_TASKS = []
 
     @classmethod
     async def clear_all_caches(cls):
         async_cache_log.warning("Clearing caches...")
-        msg = "Clearing cache of %s tasks. Last clear was %s s ago at %s.\n" % \
-              (len(cls.CACHED_TASKS), datetime.now() - cls.LAST_CACHE_CLEAR, cls.LAST_CACHE_CLEAR)
+        caches = [deco for deco in cls.DECORATORS.values() if isinstance(deco, DecoratorClass)]
+        msg = "Clearing cache of %s wrapped functions. Last clear was %s s ago at %s.\n%s\n" % \
+              (len(caches), datetime.now() - cls.LAST_CACHE_CLEAR, cls.LAST_CACHE_CLEAR,
+               cls.format_all_statistics(caches))
 
-        for task in cls.CACHED_TASKS:
-            msg += "Statistics for task %s:\n" \
-                   "\tCalls: %s\n" \
-                   "\tCache: %s\n" % (task.__name__, getattr(task, "call_info", lambda: "???")(), task.cache_info())
-            await task.clear_cache()
+        for cache in caches:
+            await cache.clear_cache()
 
         cls.LAST_CACHE_CLEAR = datetime.now()
         msg = msg.strip()
@@ -107,7 +136,6 @@ class AsyncTaskCache(DecoratorClass):
 
     def __init__(self, user_func):
         super().__init__(user_func)
-        self.__class__.CACHED_TASKS.append(self)
 
         self.__hits = 0
         self.__misses = 0
@@ -119,8 +147,13 @@ class AsyncTaskCache(DecoratorClass):
         # initialize lazy, so that asyncio.get_event_loop() doesn't create a new event loop before the actual one is set
         return asyncio.Lock()
 
-    def cache_info(self):
-        return CacheInfo(self.__hits, self.__misses, len(self.__cache))
+    def get_statistics(self):
+        return {
+            "cache_hits": self.__hits,
+            "cache_misses": self.__misses,
+            "cache_size": len(self.__cache),
+            **super().get_statistics()
+        }
 
     async def clear_cache(self):
         async with self.__lock:
@@ -185,6 +218,13 @@ class AsyncTimedTaskCache(AsyncTaskCache):
         self.__cache_times = {}  # type: Dict[Any, int]
         self.__cache_fallbacks = {}  # type: Dict[Any, asyncio.Future]
         self.cache_timeout = 600  # type: int
+
+    def get_statistics(self):
+        return {
+            "fallback_cache_size": len(self.__cache_fallbacks),
+            # further stats could be: average / max cache age, fallback / active cache intersection, ...
+            **super().get_statistics()
+        }
 
     def _get_fallback_value(self, key):
         res = self._get_valid_cache_value(key, ignore_timeout=True)
