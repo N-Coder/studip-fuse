@@ -5,6 +5,7 @@ import inspect
 import logging.handlers
 import os
 import pprint
+import socket
 import tempfile
 from asyncio import BaseEventLoop
 from stat import S_IFREG
@@ -15,6 +16,7 @@ import attr
 from aiohttp import ServerDisconnectedError
 from attr import Factory
 from fuse import FUSE, FuseOSError, fuse_get_context
+
 from studip_api.downloader import Download
 from studip_fuse.__main__.main_loop import main_loop
 from studip_fuse.__main__.thread_util import ThreadSafeDefaultDict, await_loop_thread_shutdown
@@ -51,16 +53,38 @@ class FixedFUSE(FUSE):
             else:
                 try:
                     return func(*args, **kwargs) or 0
-                except (TimeoutError, asyncio.TimeoutError):
+
+                except (TimeoutError, asyncio.TimeoutError) as e:
+                    log.debug("FUSE operation %s raised a %s, returning errno.ETIMEDOUT.",
+                              func.__name__, type(e), exc_info=True)
                     return -errno.ETIMEDOUT
-                except concurrent.futures.CancelledError:
+
+                except concurrent.futures.CancelledError as e:
+                    log.debug("FUSE operation %s raised a %s, returning errno.ECANCELED.",
+                              func.__name__, type(e), exc_info=True)
                     return -errno.ECANCELED
-                except ServerDisconnectedError:
+
+                except ServerDisconnectedError as e:
+                    log.debug("FUSE operation %s raised a %s, returning errno.ECONNRESET.",
+                              func.__name__, type(e), exc_info=True)
                     return -errno.ECONNRESET
+
+                except (socket.gaierror, socket.herror) as e:
+                    log.debug("FUSE operation %s raised a %s, returning errno.EHOSTUNREACH.",
+                              func.__name__, type(e), exc_info=True)
+                    return -errno.EHOSTUNREACH
+
                 except OSError as e:
-                    return -(e.errno or errno.EINVAL)
+                    if e.errno > 0:
+                        log.debug("FUSE operation %s raised a %s, returning errno %s.", func.__name__, type(e), exc_info=True)
+                        return -e.errno
+                    else:
+                        log.error("FUSE operation %s raised an OSError with negative errno %s, returning errno.EINVAL.",
+                                  func.__name__, e.errno, exc_info=True)
+                        return -errno.EINVAL
+
                 except Exception:
-                    log.error("Uncaught exception from FUSE operation %s, returning errno.EFAULT.",
+                    log.error("Uncaught exception from FUSE operation %s, returning errno.EINVAL.",
                               func.__name__, exc_info=True)
                     return -errno.EINVAL
 
