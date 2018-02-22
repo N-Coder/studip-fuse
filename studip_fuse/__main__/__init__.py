@@ -1,3 +1,4 @@
+import faulthandler
 import logging
 import logging.config
 import sys
@@ -45,6 +46,7 @@ def main():
     try:
         logging.config.dictConfig(yaml.load(pkg_resources.resource_string('studip_fuse.__main__', 'logging.yaml')))
         sys.excepthook = excepthook
+        faulthandler.enable(file=sys.stderr, all_threads=True)
         # reroute std streams after logging config, so that a config logging to sys.stdout still logs to the initial stream
         sys.stdout = LoggerWriter(logging.getLogger('studip_fuse.stdout').info, sys.stdout)
         sys.stderr = LoggerWriter(logging.getLogger('studip_fuse.stderr').error, sys.stderr)
