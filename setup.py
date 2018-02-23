@@ -26,7 +26,8 @@ if __name__ == "__main__":
             "argparse",
             "appdirs",
             "sh",
-            "pyyaml"
+            "pyyaml",
+            "frozendict",
         ],
         dependency_links=[
             "git+https://github.com/N-Coder/studip-api#egg=studip-api"  # -" + version
