@@ -1,6 +1,7 @@
 import json
 import os
 import time
+from itertools import groupby
 from stat import S_ISREG
 
 import aiofiles.os as aio_os
@@ -24,29 +25,31 @@ class CachedStudIPSession(StudIPSession):
         self.parser.FolderFactory = Folder.get_or_create
 
     def save_model(self):
-        def get_id(v):
-            assert isinstance(v, ModelObject)
-            return v.id
-
-        def transform(k, v):
-            assert k[0] == self
-            k = [get_id(kv) for kv in k]
-            if isinstance(v, list):
-                return k, [get_id(vv) for vv in v]
-            else:
-                return k, get_id(v)
-
+        start = time.perf_counter()
         with open(os.path.join(self.cache_dir, "model_data.json"), "wt") as f:
             json.dump(ModelObjectMeta.export_all_data(), f)
-            # TODO also dump self.get_semesters.AsyncTaskCache__cache...
-            return "stored"
+            return "stored, took %ss" % (time.perf_counter() - start)
 
     def load_model(self, update=False):
+        start = time.perf_counter()
         with open(os.path.join(self.cache_dir, "model_data.json"), "rt") as f:
             ModelObjectMeta.import_all_data(json.load(f), update)
-            return "loaded"
 
-    # TODO replace cached_task by Model data reusage
+        def set_fb(method, value, *key_args, **key_kwargs):
+            method._set_fallback_value(method._make_key((self,) + key_args, key_kwargs), value, overwrite=False)
+
+        set_fb(self.get_semesters, Semester.INSTANCES, {})
+
+        for semester, courses in groupby(sorted(Course.INSTANCES, key=lambda c: c.semester.id), key=Course.semester):
+            set_fb(self.get_courses, list(courses), semester)
+
+        for file in File.INSTANCES:
+            if file.is_root:
+                set_fb(self.get_course_files, file, file.course)
+            elif file.is_folder():
+                set_fb(self.get_folder_files, file, file)
+
+        return "loaded, took %ss" % (time.perf_counter() - start)
 
     @cached_task()
     async def get_semesters(self):
