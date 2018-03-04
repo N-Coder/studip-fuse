@@ -161,8 +161,7 @@ class AsyncTaskCache(DecoratorClass):
             self.__hits = self.__misses = 0
 
     def __call__(self, *args, **kwargs):
-        from functools import _make_key as make_key
-        return self._get_cached_task(make_key(args, kwargs, typed=False), args, kwargs)
+        return self._get_cached_task(self._make_key(args, kwargs), args, kwargs)
 
     def _get_valid_cache_value(self, key, **kwargs):
         val = self.__cache.get(key, None)
@@ -170,6 +169,11 @@ class AsyncTaskCache(DecoratorClass):
             return val
         else:
             return self.CACHE_SENTINEL
+
+    def _make_key(self, args, kwargs):
+        from functools import _make_key as make_key
+        # FIXME calling with args or just one simple type might lead to different key than calling with kwargs
+        return make_key(args, kwargs, typed=False)
 
     def _is_valid_cache_value(self, key, val, **kwargs):
         assert not kwargs, "Didn't expect kwargs %s" % kwargs
@@ -226,7 +230,15 @@ class AsyncTimedTaskCache(AsyncTaskCache):
             **super().get_statistics()
         }
 
+    def _set_fallback_value(self, key, value, overwrite=True):
+        if overwrite or self.__cache_fallbacks.get(key, self.CACHE_SENTINEL) is self.CACHE_SENTINEL:
+            assert self._is_valid_cache_value(key, value, ignore_timeout=True)
+            self.__cache_fallbacks[key] = value
+
     def _get_fallback_value(self, key):
+        return self.__cache_fallbacks.get(key, self.CACHE_SENTINEL)
+
+    def _get_any_value(self, key):
         res = self._get_valid_cache_value(key, ignore_timeout=True)
         if res is not self.CACHE_SENTINEL:
             return res
