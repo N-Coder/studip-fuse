@@ -11,12 +11,14 @@ formatters:
 handlers:
   syslog:
     class: logging.handlers.SysLogHandler
-    address: /dev/log
+    # handlers.syslog.address will be inferred automatically to /dev/log, /var/run/syslog or /dev/null
+    # address: /dev/log
     formatter: syslog
 
   file:
     class: logging.handlers.WatchedFileHandler
-    filename: /tmp/studip_fuse.log
+    # handlers.file.filename will be inferred automatically to user_cache_dir/studip-log.txt
+    # filename: /tmp/studip_fuse.log
     formatter: simple
 
   console:

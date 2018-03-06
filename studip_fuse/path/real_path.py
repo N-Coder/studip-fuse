@@ -1,4 +1,5 @@
 import logging
+import os
 from asyncio import gather
 from typing import Dict, List, Optional, Set
 
@@ -45,12 +46,18 @@ class RealPath(object):
             iter_log.debug("Resolving empty relative path to self")
             return self
 
+        if os.name == 'nt':
+            # on Windows, all file names will be converted to upper case
+            eq = lambda x, y: x.upper() == y.upper()
+        else:
+            eq = lambda x, y: x == y
+
         resolved_real_file = content_file = None
         for content_file in await self.list_contents():
-            if rel_path == content_file.path:  # Exact Match
+            if eq(rel_path, content_file.path):  # Exact Match
                 resolved_real_file = content_file
                 break
-            elif path_head(rel_path) == path_name(content_file.path):  # Found Parent
+            elif eq(path_head(rel_path), path_name(content_file.path)):  # Found Parent
                 resolved_real_file = await content_file.resolve(path_tail(rel_path))
                 break
             else:  # Other File

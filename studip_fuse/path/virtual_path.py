@@ -3,7 +3,7 @@ import os
 from asyncio import as_completed
 from datetime import datetime
 from os import path
-from stat import S_IFDIR, S_IFREG
+from stat import S_IFDIR, S_IFREG, S_IRGRP, S_IROTH, S_IRUSR
 from typing import Any, Dict, List, Optional, Set, Tuple, Type, Union
 
 import attr
@@ -143,8 +143,12 @@ class VirtualPath(object):
         pass
 
     def getattr(self):
-        d = dict(st_ino=hash(self.partial_path), st_mode=(S_IFDIR if self.is_folder else S_IFREG) | 0o755,
-                 st_uid=os.getuid(), st_gid=os.getgid(), st_nlink=1)
+        d = dict(st_ino=hash(self.partial_path), st_nlink=1,
+                 st_mode=(S_IFDIR if self.is_folder else S_IFREG) | S_IRUSR | S_IRGRP | S_IROTH)
+        if hasattr(os, "getuid"):
+            d["st_uid"] = os.getuid()
+        if hasattr(os, "getgid"):
+            d["st_gid"] = os.getgid()
         if self.mod_times[0]:
             d["st_ctime"] = self.mod_times[0].timestamp()
         if self.mod_times[1]:

@@ -1,6 +1,6 @@
 import re
 from enum import IntEnum
-from os.path import normpath
+from posixpath import normpath
 from string import Formatter
 from typing import Set, Type
 
