@@ -11,7 +11,7 @@ from cached_property import cached_property
 from frozendict import frozendict
 
 from studip_api.downloader import Download
-from studip_api.model import Course, File, Folder, Semester
+from studip_api.model import Course, File, Semester
 from studip_fuse.cache import cached_task
 from studip_fuse.path.path_util import Charset, EscapeMode, escape_file_name, get_format_segment_requires, \
     normalize_path, path_head, path_tail
@@ -32,13 +32,26 @@ class VirtualPath(object):
     @known_data.validator
     def validate(self, *_):
         if not self.is_folder:
-            assert self._file
+            assert self._file, \
+                "virtual path %s has no more possible path segments (and thus must be a file, " \
+                "not a folder), but doesn't uniquely describe a single file" % self
         if self._course:
-            assert not self._semester or self._course.semester == self._semester
+            assert not self._semester or self._course.semester == self._semester, \
+                "virtual path %s describes course %s of semester %s, " \
+                "which doesn't match the semester of the virtual path %s" % \
+                (self, self._course, self._course.semester, self._semester)
         if self._file:
-            assert not self._semester or self._file.course.semester == self._semester
-            assert not self._course or self._file.course == self._course
-        assert Folder not in self.known_data
+            assert not self._semester or self._course.semester == self._semester, \
+                "virtual path %s describes file %s of semester %s, " \
+                "which doesn't match the semester of the virtual path %s" % \
+                (self, self._course, self._course.semester, self._semester)
+            assert not self._course or self._file.course == self._course, \
+                "virtual path %s describes file %s of course %s %s, " \
+                "which doesn't match the course of the virtual path %s %s" % \
+                (self, self._file, self._file.course, self._file.course.semester, self._course, self._course.semester)
+        inv_keys = set(self.known_data.keys()).difference([File, Course, Semester])
+        if inv_keys:
+            raise ValueError("invalid keys for known_data: %s" % inv_keys)
 
     # public properties  ###############################################################################################
 
@@ -64,7 +77,7 @@ class VirtualPath(object):
 
     @cached_task()
     async def list_contents(self) -> List['VirtualPath']:
-        assert self.is_folder
+        assert self.is_folder, "list_contents called on non-folder %s" % self
 
         if File in self._content_options:
             return await self._list_contents_file_options()
@@ -95,11 +108,12 @@ class VirtualPath(object):
                     for s in await self.session.get_semesters()]
 
         else:
-            assert "{" not in path_head(self.next_path_segments)  # static name
+            assert not self._content_options, "unknown content options %s for virtual path %s" % \
+                                              (self._content_options, self)
             return [self._sub_path()]
 
     async def _list_contents_file_options(self) -> List['VirtualPath']:
-        assert self.is_folder
+        assert self.is_folder, "_list_contents_file_options called on non-folder %s" % self
 
         if self._file:
             if self._loop_over_path and self._file.is_folder():  # loop over contents of one folder #1
@@ -161,7 +175,7 @@ class VirtualPath(object):
         return d
 
     async def open_file(self, flags) -> Download:
-        assert not self.is_folder
+        assert not self.is_folder, "open_file called on folder %s" % self
         return await self.session.download_file_contents(self._file)
 
     # private properties ###############################################################################################
@@ -263,7 +277,7 @@ class VirtualPath(object):
             return set()
 
     def _sub_path(self, new_known_data=None, increment_path_segments=True, **kwargs):
-        assert self.is_folder
+        assert self.is_folder, "_sub_path called on non-folder %s" % self
         args = dict(session=self.session, parent=self, known_data=self.known_data)
         if increment_path_segments:
             args.update(path_segments=self.path_segments + (path_head(self.next_path_segments),),
