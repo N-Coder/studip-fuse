@@ -4,6 +4,7 @@ import inspect
 import logging
 import sys
 from datetime import datetime
+from itertools import chain
 from threading import current_thread
 from time import time
 from typing import Any, Dict
@@ -11,10 +12,8 @@ from typing import Any, Dict
 from cached_property import cached_property
 from tabulate import tabulate
 
-from studip_api.downloader import Download
-
-__all__ = ["CoroCallCounter", "AsyncTaskCache", "AsyncTimedTaskCache", "DownloadTaskCache", "cached_task",
-           "cached_download"]
+__all__ = ["CoroCallCounter", "AsyncTaskCache", "AsyncTimedTaskCache", "DownloadTaskCache", "ModelGetterCache",
+           "cached_task"]
 
 async_cache_log = logging.getLogger("studip_fuse.async_cache")
 
@@ -140,7 +139,7 @@ class AsyncTaskCache(DecoratorClass):
         self.__hits = 0
         self.__misses = 0
 
-        self.__cache = {}  # type: Dict[Any, asyncio.Future]
+        self.__cache = {}  # type: Dict[Any, asyncio.Future] # TODO rename
 
     @cached_property
     def __lock(self):
@@ -198,7 +197,7 @@ class AsyncTaskCache(DecoratorClass):
     def _create_new_cache_value(self, key, old_value, args, kwargs):
         return asyncio.ensure_future(self.__wrapped__(*args, **kwargs))
 
-    async def _get_cached_task(self, key, args, kwargs):
+    async def _get_cached_task(self, key, args, kwargs):  # TODO rename to _get_or_create_cache_value
         res = self._get_valid_cache_value(key)
         if res is not self.CACHE_SENTINEL:
             self.__hits += 1
@@ -260,6 +259,8 @@ class AsyncTimedTaskCache(AsyncTaskCache):
 
 class DownloadTaskCache(AsyncTaskCache):
     def _is_valid_cache_value(self, key, value, **kwargs):
+        from studip_api.downloader import Download
+
         is_valid = super()._is_valid_cache_value(key, value, **kwargs)
         if is_valid and value.done() and isinstance(value.result(), Download):
             return super()._is_valid_cache_value(key, value.result().completed, **kwargs)
@@ -267,6 +268,8 @@ class DownloadTaskCache(AsyncTaskCache):
             return is_valid  # not a Download or still in progress, rely on result of super method
 
     def _create_new_cache_value(self, key, old_value, args, kwargs):
+        from studip_api.downloader import Download
+
         if old_value is not self.CACHE_SENTINEL:
             assert asyncio.isfuture(old_value) and old_value.done() \
                    and not old_value.exception() and not old_value.cancelled(), \
@@ -276,6 +279,50 @@ class DownloadTaskCache(AsyncTaskCache):
             return asyncio.ensure_future(old_value.result().fork())
 
         return super()._create_new_cache_value(key, old_value, args, kwargs)
+
+
+class ModelGetterCache(AsyncTaskCache):
+    def _make_key(self, args, kwargs):
+        from studip_api.session import StudIPSession
+        assert isinstance(args[0], StudIPSession)
+        keys = list(chain(args[1:], kwargs.values()))
+        if len(keys) == 0:
+            return ""
+        else:
+            assert len(keys) == 1
+            from studip_api.model import ModelObject
+            assert isinstance(keys[0], ModelObject)
+            return {"type": keys[0].__class__, "id": keys[0].id}
+
+    def export_cache(self):
+        def conv(v):
+            if isinstance(v, list):
+                return [conv(i) for i in v]
+            else:
+                from studip_api.model import ModelObject
+                assert isinstance(v, ModelObject)
+                return v.id
+
+        return {k: conv(v.result()) for k, v in self.AsyncTaskCache__cache.items()
+                if v.done() and not v.cancelled() and not v.exception()}
+
+    def import_cache(self, data, update=False):
+        def conv(v):
+            if isinstance(v, list):
+                return [conv(i) for i in v]
+            else:
+                assert isinstance(v, dict)
+                assert v.keys() == ["type", "id"]
+                from studip_api.model import ModelObjectMeta
+                return ModelObjectMeta.TRACKED_CLASSES[v["type"]].INSTANCES.get(v["id"])
+
+        for k, v in data:
+            fut = asyncio.get_event_loop().create_future()
+            fut.set_result(conv(v))
+            if update:
+                self.AsyncTaskCache__cache.items[k] = fut
+            else:
+                self.AsyncTaskCache__cache.items.setdefault(k, fut)
 
 
 def cached_task(cache_class=AsyncTimedTaskCache):
@@ -288,7 +335,3 @@ def cached_task(cache_class=AsyncTimedTaskCache):
         return wrapped
 
     return wrapper
-
-
-def cached_download():
-    return cached_task(DownloadTaskCache)
