@@ -25,9 +25,10 @@ if __name__ == "__main__":
             "fusepy",
             "argparse",
             "appdirs",
-            "sh",
+            # "sh",
             "pyyaml",
             "frozendict",
+            "tabulate"
         ],
         dependency_links=[
             "git+https://github.com/N-Coder/studip-api#egg=studip-api"  # -" + version

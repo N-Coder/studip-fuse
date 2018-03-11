@@ -79,7 +79,8 @@ class RealPath(object):
         # initialize the set with the root paths
         for root_vp in self.generating_vps:
             contents.setdefault(root_vp.partial_path, set()).add(root_vp)
-        assert len(contents) == 1  # root paths must have the same effective path
+        assert len(contents) == 1, "generating_vps %s of real path %s don't have same effective partial_path: %s" % \
+                                   (self.generating_vps, self, contents)
         iter_log.debug("Got %s VirtualPaths generating path '%s', listing contents...",
                        len(contents[self.path]), self)
 

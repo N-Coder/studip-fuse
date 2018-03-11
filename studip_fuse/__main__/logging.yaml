@@ -41,6 +41,9 @@ loggers:
   studip_api.Download.progress:
     level: INFO
 
+  studip_api.model:
+    level: INFO
+
   studip_fuse.stdout:
     handlers: [syslog, file]
     propagate: False
