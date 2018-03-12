@@ -35,7 +35,10 @@ if __name__ == "__main__":
             "git+https://github.com/N-Coder/studip-api#egg=studip-api"  # -" + version
         ],
         entry_points={
-            "console_scripts": ["studip-fuse = studip_fuse.__main__:main"]
+            "console_scripts": [
+                "studip-fuse = studip_fuse.__main__:main",
+                "studip-fuse-install-nautilus-plugin = studip_fuse.nautilus_plugin:main",
+            ]
         },
         version=version,
         description="Python FUSE drive for courses and files available through the Stud.IP University Access Portal",
