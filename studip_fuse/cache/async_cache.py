@@ -31,7 +31,7 @@ class DecoratorClass(object):
 
     def __get__(self, obj, type=None):
         # see https://stackoverflow.com/questions/47433768#comment81822552_47433786
-        return functools.partial(self, obj)
+        return BoundDecorator(self, obj)
 
     def __str__(self):
         return "<%s %s>" % (self.__class__.__name__, self.__wrapped__)
@@ -62,50 +62,56 @@ class DecoratorClass(object):
         return tabulate(lines, headers="keys")
 
 
+class BoundDecorator(functools.partial):
+    def __getattr__(self, item):
+        # redirect to wrapped partial func if an attr is not found on self
+        return getattr(self.func, item)
+
+
 class CoroCallCounter(DecoratorClass):
     def __init__(self, user_func):
         super().__init__(user_func)
 
-        self.__call_counter = 0
-        self.__successful_calls = 0
-        self.__failed_calls = 0
+        self._call_counter = 0
+        self._successful_calls = 0
+        self._failed_calls = 0
 
     def get_statistics(self):
         return {
-            "call_counter": self.__call_counter,
-            "pending_calls": (self.__call_counter - self.__successful_calls - self.__failed_calls),
-            "successful_calls": self.__successful_calls,
-            "failed_calls": self.__failed_calls,
+            "call_counter": self._call_counter,
+            "pending_calls": (self._call_counter - self._successful_calls - self._failed_calls),
+            "successful_calls": self._successful_calls,
+            "failed_calls": self._failed_calls,
             **super().get_statistics()
         }
 
     def __call__(self, *args, **kwargs):
-        return self.__schedule_task(*args, **kwargs)
+        return self._schedule_task(*args, **kwargs)
 
-    def __schedule_task(self, *args, **kwargs):
-        self.__call_counter += 1
-        my_call_counter = self.__call_counter
+    def _schedule_task(self, *args, **kwargs):
+        self._call_counter += 1
+        my_call_counter = self._call_counter
         if async_cache_log.isEnabledFor(logging.DEBUG):
             async_cache_log.debug(
                 "Scheduling %s#%s: %s%s from thread %s",
                 self.__wrapped__.__name__, my_call_counter, self.__wrapped__,
                 inspect.signature(self.__wrapped__).bind(*args, **kwargs), current_thread())
-        coro = self.__call_async(my_call_counter, *args, **kwargs)
+        coro = self._call_async(my_call_counter, *args, **kwargs)
         async_cache_log.debug("Scheduled %s#%s as %s", self.__wrapped__.__name__, my_call_counter, coro)
         return coro
 
-    async def __call_async(self, my_call_counter, *args, **kwargs):
+    async def _call_async(self, my_call_counter, *args, **kwargs):
         async_cache_log.debug("Started execution of %s#%s", self.__wrapped__.__name__, my_call_counter)
         try:
             result = await self.__wrapped__(*args, **kwargs)
             async_cache_log.debug("Completed execution of %s#%s = %s", self.__wrapped__.__name__, my_call_counter,
                                   result)
-            self.__successful_calls += 1
+            self._successful_calls += 1
             return result
         except:
             async_cache_log.debug("Execution of %s#%s failed with %s", self.__wrapped__.__name__, my_call_counter,
                                   sys.exc_info()[1])
-            self.__failed_calls += 1
+            self._failed_calls += 1
             raise
 
 
@@ -136,34 +142,35 @@ class AsyncTaskCache(DecoratorClass):
     def __init__(self, user_func):
         super().__init__(user_func)
 
-        self.__hits = 0
-        self.__misses = 0
+        self._hits = 0
+        self._misses = 0
 
-        self.__cache = {}  # type: Dict[Any, asyncio.Future] # TODO rename
+        self._cache = {}  # type: Dict[Any, asyncio.Future]
 
     @cached_property
-    def __lock(self):
+    def __cache_lock(self):
         # initialize lazy, so that asyncio.get_event_loop() doesn't create a new event loop before the actual one is set
+        # XXX eventual deadlock if this attribute is made public
         return asyncio.Lock()
 
     def get_statistics(self):
         return {
-            "cache_hits": self.__hits,
-            "cache_misses": self.__misses,
-            "cache_size": len(self.__cache),
+            "cache_hits": self._hits,
+            "cache_misses": self._misses,
+            "cache_size": len(self._cache),
             **super().get_statistics()
         }
 
     async def clear_cache(self):
-        async with self.__lock:
-            self.__cache.clear()
-            self.__hits = self.__misses = 0
+        async with self.__cache_lock:
+            self._cache.clear()
+            self._hits = self._misses = 0
 
     def __call__(self, *args, **kwargs):
-        return self._get_cached_task(self._make_key(args, kwargs), args, kwargs)
+        return self._get_or_create_cache_value(self._make_key(args, kwargs), args, kwargs)
 
     def _get_valid_cache_value(self, key, **kwargs):
-        val = self.__cache.get(key, None)
+        val = self._cache.get(key, None)
         if self._is_valid_cache_value(key, val, **kwargs):
             return val
         else:
@@ -197,62 +204,62 @@ class AsyncTaskCache(DecoratorClass):
     def _create_new_cache_value(self, key, old_value, args, kwargs):
         return asyncio.ensure_future(self.__wrapped__(*args, **kwargs))
 
-    async def _get_cached_task(self, key, args, kwargs):  # TODO rename to _get_or_create_cache_value
+    async def _get_or_create_cache_value(self, key, args, kwargs):
         res = self._get_valid_cache_value(key)
         if res is not self.CACHE_SENTINEL:
-            self.__hits += 1
+            self._hits += 1
             return await res
 
-        async with self.__lock:
+        async with self.__cache_lock:
             res = self._get_valid_cache_value(key)
             if res is not self.CACHE_SENTINEL:
-                self.__hits += 1
+                self._hits += 1
                 return await res
 
             res = self._create_new_cache_value(key, res, args, kwargs)
-            self.__cache[key] = res
-            self.__misses += 1
+            self._cache[key] = res
+            self._misses += 1
             return await res
 
 
 class AsyncTimedTaskCache(AsyncTaskCache):
     def __init__(self, user_func):
         super().__init__(user_func)
-        self.__cache_times = {}  # type: Dict[Any, int]
-        self.__cache_fallbacks = {}  # type: Dict[Any, asyncio.Future]
+        self._cache_times = {}  # type: Dict[Any, int]
+        self._cache_fallbacks = {}  # type: Dict[Any, asyncio.Future]
         self.cache_timeout = 600  # type: int
 
     def get_statistics(self):
         return {
-            "fallback_cache_size": len(self.__cache_fallbacks),
+            "fallback_cache_size": len(self._cache_fallbacks),
             # further stats could be: average / max cache age, fallback / active cache intersection, ...
             **super().get_statistics()
         }
 
     def _set_fallback_value(self, key, value, overwrite=True):
-        if overwrite or self.__cache_fallbacks.get(key, self.CACHE_SENTINEL) is self.CACHE_SENTINEL:
+        if overwrite or self._cache_fallbacks.get(key, self.CACHE_SENTINEL) is self.CACHE_SENTINEL:
             assert self._is_valid_cache_value(key, value, ignore_timeout=True)
-            self.__cache_fallbacks[key] = value
+            self._cache_fallbacks[key] = value
 
     def _get_fallback_value(self, key):
-        return self.__cache_fallbacks.get(key, self.CACHE_SENTINEL)
+        return self._cache_fallbacks.get(key, self.CACHE_SENTINEL)
 
     def _get_any_value(self, key):
         res = self._get_valid_cache_value(key, ignore_timeout=True)
         if res is not self.CACHE_SENTINEL:
             return res
-        return self.__cache_fallbacks.get(key, self.CACHE_SENTINEL)
+        return self._cache_fallbacks.get(key, self.CACHE_SENTINEL)
 
     def _create_new_cache_value(self, key, old_value, args, kwargs):
         if self._is_valid_cache_value(key, old_value, ignore_timeout=True):
-            self.__cache_fallbacks[key] = old_value
+            self._cache_fallbacks[key] = old_value
         value = super()._create_new_cache_value(key, old_value, args, kwargs)
-        self.__cache_times[key] = time()
+        self._cache_times[key] = time()
         return value
 
     def _is_valid_cache_value(self, key, val, ignore_timeout=False, **kwargs):
         if super()._is_valid_cache_value(key, val, **kwargs):
-            return ignore_timeout or self.__cache_times[key] - time() < self.cache_timeout
+            return ignore_timeout or self._cache_times[key] - time() < self.cache_timeout
         else:
             return False
 
@@ -292,7 +299,7 @@ class ModelGetterCache(AsyncTaskCache):
             assert len(keys) == 1
             from studip_api.model import ModelObject
             assert isinstance(keys[0], ModelObject)
-            return {"type": keys[0].__class__, "id": keys[0].id}
+            return keys[0]
 
     def export_cache(self):
         def conv(v):
@@ -301,28 +308,30 @@ class ModelGetterCache(AsyncTaskCache):
             else:
                 from studip_api.model import ModelObject
                 assert isinstance(v, ModelObject)
-                return v.id
+                return {"type": v.__class__.__name__, "id": v.id}
 
-        return {k: conv(v.result()) for k, v in self.AsyncTaskCache__cache.items()
+        return {k: conv(v.result()) for k, v in self._cache.items()
                 if v.done() and not v.cancelled() and not v.exception()}
 
-    def import_cache(self, data, update=False):
+    def import_cache(self, data, update=False, create_future=None):
         def conv(v):
             if isinstance(v, list):
                 return [conv(i) for i in v]
             else:
                 assert isinstance(v, dict)
-                assert v.keys() == ["type", "id"]
+                assert v.keys() == {"type", "id"}
                 from studip_api.model import ModelObjectMeta
                 return ModelObjectMeta.TRACKED_CLASSES[v["type"]].INSTANCES.get(v["id"])
 
-        for k, v in data:
-            fut = asyncio.get_event_loop().create_future()
+        if not create_future:
+            create_future = asyncio.get_event_loop().create_future
+        for k, v in data.items():
+            fut = create_future()
             fut.set_result(conv(v))
             if update:
-                self.AsyncTaskCache__cache.items[k] = fut
+                self._cache[k] = fut
             else:
-                self.AsyncTaskCache__cache.items.setdefault(k, fut)
+                self._cache.setdefault(k, fut)
 
 
 def cached_task(cache_class=AsyncTimedTaskCache):

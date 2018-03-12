@@ -42,7 +42,7 @@ class CachedStudIPSession(StudIPSession):
             ModelObjectMeta.import_all_data(data, update)
 
             for f, d in func_imports:
-                f.import_cache(d, update)
+                f.import_cache(d, update, create_future=self._loop.create_future)
         return "loaded, took %ss" % (time.perf_counter() - start)
 
     @cached_task(cache_class=ModelGetterCache)
