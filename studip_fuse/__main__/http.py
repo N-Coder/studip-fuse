@@ -33,16 +33,3 @@ def save_model():
 @app.route("/load_model", methods=["POST"])
 def load_model():
     return fuseview_inst.session.load_model()
-
-    # def getxattr(self, path, name, position=0):
-    #     status = [
-    #         "unknown", # == "unavailable-offline",
-    #         "pending",
-    #         "available",
-    #         "stale",
-    #         "failed",
-    #     ]
-    #     return {"studip-fuse.contents-status":status}
-    #
-    # def listxattr(self, path):
-    #     return ["studip-fuse.contents-status"]
