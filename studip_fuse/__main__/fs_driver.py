@@ -14,12 +14,15 @@ import attr
 from aiohttp import ClientConnectorError, ServerDisconnectedError
 from attr import Factory
 from fuse import FUSE, FuseOSError, fuse_get_context
+from more_itertools import one
 
 from studip_api.downloader import Download
 from studip_fuse.__main__.main_loop import main_loop
 from studip_fuse.__main__.thread_util import ThreadSafeDefaultDict, await_loop_thread_shutdown
 from studip_fuse.cache import CachedStudIPSession, cached_task
 from studip_fuse.path import RealPath, VirtualPath, path_name
+
+ENOATTR = getattr(errno, "ENOATTR", getattr(errno, "ENODATA"))
 
 log = logging.getLogger("studip_fuse.fs_driver")
 log_ops = logging.getLogger("studip_fuse.fs_driver.ops")
@@ -245,3 +248,54 @@ class FUSEView(object):
 
     def fsync(self, path, fdatasync, fh):
         return self.flush(path, fh)
+
+    def get_content_task(self, path) -> asyncio.Future:
+        realpath = self._resolve(path)
+        if realpath.is_folder:
+            return realpath.list_contents.get_cached_value()
+
+        else:
+            file = one(realpath.generating_vps)._file
+            if self.schedule_async(self.session.has_cached_download(file)).result():
+                # the file was already loaded, so it's save to force cache value creation without triggering a download
+                download = self.schedule_async(realpath.open_file(os.O_RDONLY)).result()
+                return download.completed
+            else:
+                download_future = self.session.download_file_contents.get_cached_value(file)
+                if isinstance(download_future, asyncio.Future) and download_future.done() \
+                        and not download_future.cancelled() and not download_future.exception():
+                    # if the download was already started, return the download.completed future tracking download progress
+                    download = download_future.result()
+                    return download.completed
+                else:
+                    return download_future
+
+    def getxattr(self, path, name, position=0):
+        if name == "user.studip-fuse.contents-status":
+            coro = self.get_content_task(path)
+            if not isinstance(coro, asyncio.Future):
+                return "unknown".encode()  # == "unavailable-offline"
+            elif not coro.done():
+                return "pending".encode()
+            elif coro.cancelled() or coro.exception():
+                return "failed".encode()
+            else:
+                return "available".encode()
+            # TODO missing states: "stale",
+        elif name == "user.studip-fuse.contents-exception":
+            coro = self.get_content_task(path)
+            if not isinstance(coro, asyncio.Future):
+                return "InvalidStateError: operation was not started yet".encode()
+            elif not coro.done():
+                return "InvalidStateError: operation is not complete yet".encode()
+            elif coro.cancelled():
+                return "CancelledError: operation was cancelled".encode()
+            elif coro.exception():
+                return ("%s: %s" % (coro.exception().__class__.__name__, coro.exception())).encode()
+            else:
+                return "".encode()
+        else:
+            raise FuseOSError(ENOATTR)
+
+    def listxattr(self, path):
+        return ["user.studip-fuse.contents-status", "user.studip-fuse.contents-exception"]

@@ -67,6 +67,11 @@ class BoundDecorator(functools.partial):
         # redirect to wrapped partial func if an attr is not found on self
         return getattr(self.func, item)
 
+    def get_cached_value(self, *args, **kwargs):
+        newkwargs = self.keywords.copy()
+        newkwargs.update(kwargs)
+        return self.func.get_cached_value(*self.args, *args, **newkwargs)
+
 
 class CoroCallCounter(DecoratorClass):
     def __init__(self, user_func):
@@ -169,8 +174,11 @@ class AsyncTaskCache(DecoratorClass):
     def __call__(self, *args, **kwargs):
         return self._get_or_create_cache_value(self._make_key(args, kwargs), args, kwargs)
 
+    def get_cached_value(self, *args, **kwargs):
+        return self._cache.get(self._make_key(args, kwargs), self.CACHE_SENTINEL)
+
     def _get_valid_cache_value(self, key, **kwargs):
-        val = self._cache.get(key, None)
+        val = self._cache.get(key, self.CACHE_SENTINEL)
         if self._is_valid_cache_value(key, val, **kwargs):
             return val
         else:
