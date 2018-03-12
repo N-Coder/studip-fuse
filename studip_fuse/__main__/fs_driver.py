@@ -6,21 +6,20 @@ import logging.handlers
 import os
 import pprint
 import socket
-import tempfile
 from asyncio import BaseEventLoop
 from threading import Lock, Thread
-from typing import Callable, Dict, List
+from typing import Dict, List
 
 import attr
-from aiohttp import ServerDisconnectedError
+from aiohttp import ClientConnectorError, ServerDisconnectedError
 from attr import Factory
 from fuse import FUSE, FuseOSError, fuse_get_context
 
 from studip_api.downloader import Download
 from studip_fuse.__main__.main_loop import main_loop
 from studip_fuse.__main__.thread_util import ThreadSafeDefaultDict, await_loop_thread_shutdown
-from studip_fuse.cache import AsyncTaskCache, CachedStudIPSession, cached_task
-from studip_fuse.path import RealPath, VirtualPath, path_head, path_name, path_tail
+from studip_fuse.cache import CachedStudIPSession, cached_task
+from studip_fuse.path import RealPath, VirtualPath, path_name
 
 log = logging.getLogger("studip_fuse.fs_driver")
 log_ops = logging.getLogger("studip_fuse.fs_driver.ops")
@@ -68,7 +67,7 @@ class FixedFUSE(FUSE):
                                   func.__name__, type(e), exc_info=True)
                     return -errno.ECONNRESET
 
-                except (socket.gaierror, socket.herror) as e:
+                except (socket.gaierror, socket.herror, ClientConnectorError) as e:
                     log_ops.debug("FUSE operation %s raised a %s, returning errno.EHOSTUNREACH.",
                                   func.__name__, type(e), exc_info=True)
                     return -errno.EHOSTUNREACH
@@ -110,18 +109,11 @@ class FUSEView(object):
 
     loop_future = attr.ib(init=False, default=None)
     loop_thread = attr.ib(init=False, default=None)
+    api_thread = attr.ib(init=False, default=None)
     loop = attr.ib(init=False, default=None)  # type: BaseEventLoop
     session = attr.ib(init=False, default=None)  # type: CachedStudIPSession
     root_rp = attr.ib(init=False, default=None)  # type: RealPath
     open_files = attr.ib(init=False, default=Factory(dict))  # type: Dict[str, Download]
-    rpc_paths = attr.ib(init=False, default=Factory(dict))  # type: Dict[str, Callable]
-    rpc_files = attr.ib(init=False, default=Factory(dict))  # type: Dict[str, str]
-
-    def __attrs_post_init__(self):
-        self.rpc_paths["show_caches"] = AsyncTaskCache.format_all_statistics
-        self.rpc_paths["clear_caches"] = AsyncTaskCache.clear_all_caches
-        self.rpc_paths["save_model"] = CachedStudIPSession.save_model
-        self.rpc_paths["load_model"] = CachedStudIPSession.load_model
 
     @staticmethod
     def saferepr(val):
@@ -166,6 +158,11 @@ class FUSEView(object):
         self.root_rp = RealPath(parent=None, generating_vps={vp})
         log.debug("Session and virtual FS initialized")
 
+        from studip_fuse.__main__.http import run
+        self.api_thread = Thread(target=run, args=(self,), name="HTTP server thread", daemon=True)
+        self.api_thread.start()
+        log.debug("HTTP API running")
+
         log.info("Mounting complete")
 
     def destroy(self, path):
@@ -178,10 +175,6 @@ class FUSEView(object):
             self.loop.call_soon_threadsafe(self.loop.stop)
         if self.loop_thread:
             await_loop_thread_shutdown(self.loop, self.loop_thread)
-
-        for tmp_file in self.rpc_files.values():
-            if os.path.isfile(tmp_file):
-                os.unlink(tmp_file)
 
         log.info("Unmounting complete")
 
@@ -216,59 +209,13 @@ class FUSEView(object):
         else:
             raise OSError(errno.ENOTDIR)
 
-    def create(self, path, mode, fi=None):
-        if path_head(path) == ".rpc":
-            method_name = path_name(path)
-            if method_name != path_tail(path) or method_name not in self.rpc_paths:
-                raise FuseOSError(errno.EROFS)
-            if method_name in self.rpc_files and os.path.isfile(self.rpc_files[method_name]):
-                raise FileExistsError()
-
-            with tempfile.NamedTemporaryFile(mode=mode, delete=False) as f:
-                f.write(self.rpc_paths[method_name]())
-                self.rpc_files[method_name] = f.name
-                return f.name
-
-        else:
-            raise FuseOSError(errno.EROFS)
-
-    def unlink(self, path):
-        if path_head(path) == ".rpc":
-            method_name = path_name(path)
-            if method_name == path_tail(path) \
-                    and method_name in self.rpc_files \
-                    and os.path.isfile(self.rpc_files[method_name]):
-                os.unlink(self.rpc_files[method_name])
-                del self.rpc_files[method_name]
-                return
-
-        raise FuseOSError(errno.EROFS)
-
     def access(self, path, mode):
-        if path_head(path) == ".rpc":
-            method_name = path_name(path)
-            if method_name != path_tail(path) or method_name not in self.rpc_files:
-                raise FileNotFoundError()
-            return os.access(self.rpc_files[method_name], mode)
-
         return self._resolve(path).access(mode)
 
     def getattr(self, path, fh=None):
-        if path_head(path) == ".rpc":
-            method_name = path_name(path)
-            if method_name != path_tail(path) or method_name not in self.rpc_files:
-                raise FileNotFoundError()
-            return os.stat(self.rpc_files[method_name])
-
         return self._resolve(path).getattr()
 
     def open(self, path, flags):
-        if path_head(path) == ".rpc":
-            method_name = path_name(path)
-            if method_name != path_tail(path) or method_name not in self.rpc_files:
-                raise FileNotFoundError()
-            return os.open(self.rpc_files[method_name], flags)
-
         resolved_real_file = self._resolve(path)
         if resolved_real_file.is_folder:
             raise OSError(errno.EISDIR)

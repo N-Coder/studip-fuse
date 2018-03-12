@@ -299,7 +299,7 @@ class ModelGetterCache(AsyncTaskCache):
             assert len(keys) == 1
             from studip_api.model import ModelObject
             assert isinstance(keys[0], ModelObject)
-            return keys[0]
+            return keys[0].id
 
     def export_cache(self):
         def conv(v):
@@ -308,7 +308,7 @@ class ModelGetterCache(AsyncTaskCache):
             else:
                 from studip_api.model import ModelObject
                 assert isinstance(v, ModelObject)
-                return {"type": v.__class__.__name__, "id": v.id}
+                return {"type": v.__tracked_class__.__name__, "id": v.id}
 
         return {k: conv(v.result()) for k, v in self._cache.items()
                 if v.done() and not v.cancelled() and not v.exception()}

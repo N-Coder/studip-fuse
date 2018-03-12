@@ -28,7 +28,8 @@ if __name__ == "__main__":
             # "sh",
             "pyyaml",
             "frozendict",
-            "tabulate"
+            "tabulate",
+            "flask"
         ],
         dependency_links=[
             "git+https://github.com/N-Coder/studip-api#egg=studip-api"  # -" + version
