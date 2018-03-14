@@ -1,4 +1,5 @@
 import asyncio
+import errno
 import functools
 import inspect
 import logging
@@ -81,6 +82,7 @@ class CoroCallCounter(DecoratorClass):
         self._call_counter = 0
         self._successful_calls = 0
         self._failed_calls = 0
+        self._exception_handler = None
 
     def get_statistics(self):
         return {
@@ -118,7 +120,10 @@ class CoroCallCounter(DecoratorClass):
             async_cache_log.debug("Execution of %s#%s failed with %s", self.__wrapped__.__name__, my_call_counter,
                                   sys.exc_info()[1])
             self._failed_calls += 1
-            raise
+            if self._exception_handler:  # TODO allow retrying, maybe make async
+                return self._exception_handler(*sys.exc_info())
+            else:
+                raise
 
 
 class AsyncTaskCache(DecoratorClass):
@@ -330,6 +335,22 @@ class ModelGetterCache(AsyncTimedFallbackTaskCache):
             from studip_api.model import ModelObject
             assert isinstance(keys[0], ModelObject)
             return keys[0].id
+
+    def _may_create(self, key, args, kwargs):
+        return True
+
+    def __call__(self, *args, **kwargs):
+        key = self._make_key(args, kwargs)
+
+        if self._may_create(key, args, kwargs):
+            res = self._get_or_create_cache_value(key, args, kwargs)
+        else:
+            res = self._get_any_value(key, ignore_timeout=True)
+
+        if res is self.CACHE_SENTINEL:
+            raise OSError(errno.EAGAIN, "value from %s(%s) is currently not available" % (self, key))
+        else:
+            return res
 
     def export_cache(self):
         def conv(v):

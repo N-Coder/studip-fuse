@@ -20,6 +20,7 @@ from studip_api.downloader import Download
 from studip_fuse.__main__.main_loop import main_loop
 from studip_fuse.__main__.thread_util import ThreadSafeDefaultDict, await_loop_thread_shutdown
 from studip_fuse.cache import CachedStudIPSession, cached_task
+from studip_fuse.cache.circuit_breaker import CircuitBreakerOpenException
 from studip_fuse.path import RealPath, VirtualPath, path_name
 
 ENOATTR = getattr(errno, "ENOATTR", getattr(errno, "ENODATA"))
@@ -73,6 +74,10 @@ class FixedFUSE(FUSE):
                 except (socket.gaierror, socket.herror, ClientConnectorError) as e:
                     log_ops.debug("FUSE operation %s raised a %s, returning errno.EHOSTUNREACH.",
                                   func.__name__, type(e), exc_info=True)
+                    return -errno.EHOSTUNREACH
+
+                # TODO translate HTTP status codes from ClientResponseError
+                except CircuitBreakerOpenException:
                     return -errno.EHOSTUNREACH
 
                 except OSError as e:
