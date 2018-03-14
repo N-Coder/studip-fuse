@@ -4,6 +4,7 @@ import inspect
 import logging
 import sys
 from datetime import datetime
+from inspect import BoundArguments
 from itertools import chain
 from threading import current_thread
 from time import time
@@ -186,7 +187,9 @@ class AsyncTaskCache(DecoratorClass):
 
     def _make_key(self, args, kwargs):
         from functools import _make_key as make_key
-        # FIXME calling with args or just one simple type might lead to different key than calling with kwargs
+        # XXX calling with args or just one simple type might lead to a different key than calling with kwargs
+        # as the base class is only used for ephemeral caching and ModelGetterCache / DownloadTask cache have custom
+        # _make_key functions this shouldn't be a problem though
         return make_key(args, kwargs, typed=False)
 
     def _is_valid_cache_value(self, key, val, **kwargs):
@@ -273,6 +276,13 @@ class AsyncTimedTaskCache(AsyncTaskCache):
 
 
 class DownloadTaskCache(AsyncTaskCache):
+    def _make_key(self, args, kwargs):
+        from studip_api.session import StudIPSession
+        arguments = inspect.signature(StudIPSession.download_file_contents).bind(*args, **kwargs)  # type: BoundArguments
+        arguments.apply_defaults()
+        assert isinstance(arguments.arguments["self"], StudIPSession)
+        return arguments.arguments["studip_file"], arguments.arguments["local_dest"]
+
     def _is_valid_cache_value(self, key, value, **kwargs):
         from studip_api.downloader import Download
 
