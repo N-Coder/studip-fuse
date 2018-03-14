@@ -161,7 +161,7 @@ class FUSEView(object):
         self.root_rp = RealPath(parent=None, generating_vps={vp})
         log.debug("Session and virtual FS initialized")
 
-        from studip_fuse.__main__.http import run
+        from studip_fuse.__main__.http_api import run
         self.api_thread = Thread(target=run, args=(self,), name="HTTP server thread", daemon=True)
         self.api_thread.start()
         log.debug("HTTP API running")
