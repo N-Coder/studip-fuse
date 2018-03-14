@@ -74,6 +74,7 @@ class CachedStudIPSession(StudIPSession):
     async def download_file_contents(self, studip_file, local_dest=None, chunk_size=1024 * 256):
         # FIXME await_complete in parent (and thus utime / setattrs) won't be called if download is forked / restarted
         # FIXME forked download won't be marked as completed when finished
+        # FIXME add explicit calls to circuit breaker to individual download parts, potentially allowing retrying failed parts
         if not local_dest:
             local_dest = os.path.join(self.cache_dir, studip_file.id)
 

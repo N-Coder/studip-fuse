@@ -57,5 +57,6 @@ else:
                 "failed": "unreadable",
                 "available": "default",
             }.get(status, None)
+            # TODO mark as unreadable if offline, update emblems on change
             if emblem:
                 file.add_emblem(emblem)

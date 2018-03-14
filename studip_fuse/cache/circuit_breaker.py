@@ -91,6 +91,7 @@ class CircuitBreakerOpenException(Exception):
 class NetworkCircuitBreaker(object):
     properties = attr.ib(default=CircuitBreakerProperties())  # type: CircuitBreakerProperties
 
+    # TODO expose getter for status / setter for force open/closed
     status = attr.ib(init=False, default=Status.CLOSED)  # type: Status
     opened = attr.ib(init=False, default=-1)  # type: int
 
@@ -108,6 +109,7 @@ class NetworkCircuitBreaker(object):
     async def on_request_start(self, session: ClientSession, context: SimpleNamespace, params: TraceRequestStartParams):
         # TODO track request (lifecycle) times correctly, find generic way of improving / enforcing timeouts (and raise_for_status)
         # see https://github.com/aio-libs/aiohttp/issues/2768 and https://github.com/aio-libs/aiohttp/pull/2767
+        # TODO kill request on circuit open?
         if not self.attempt_execution():
             log.debug("Blocking execution of request %s trough open circuit breaker", params)
             raise CircuitBreakerOpenException()
