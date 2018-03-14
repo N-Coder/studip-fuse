@@ -31,27 +31,17 @@ class VirtualPath(object):
 
     @known_data.validator
     def validate(self, *_):
-        if not self.is_folder:
-            assert self._file, \
-                "virtual path %s has no more possible path segments (and thus must be a file, " \
-                "not a folder), but doesn't uniquely describe a single file" % self
-        if self._course:
-            assert not self._semester or self._course.semester == self._semester, \
-                "virtual path %s describes course %s of semester %s, " \
-                "which doesn't match the semester of the virtual path %s" % \
-                (self, self._course, self._course.semester, self._semester)
-        if self._file:
-            assert not self._semester or self._course.semester == self._semester, \
-                "virtual path %s describes file %s of semester %s, " \
-                "which doesn't match the semester of the virtual path %s" % \
-                (self, self._course, self._course.semester, self._semester)
-            assert not self._course or self._file.course == self._course, \
-                "virtual path %s describes file %s of course %s %s, " \
-                "which doesn't match the course of the virtual path %s %s" % \
-                (self, self._file, self._file.course, self._file.course.semester, self._course, self._course.semester)
         inv_keys = set(self.known_data.keys()).difference([File, Course, Semester])
         if inv_keys:
             raise ValueError("invalid keys for known_data: %s" % inv_keys)
+
+        if not self.is_folder:
+            assert self._file, \
+                "Virtual path %s has no more possible path segments (and thus must be a file, " \
+                "not a folder), but doesn't uniquely describe a single file. " \
+                "Does your path format specification make sense?" % self
+
+        # FIXME known_data of child may differ from parent, breaking some path logic. reenable validation (see issue #2)
 
     # public properties  ###############################################################################################
 
@@ -198,7 +188,7 @@ class VirtualPath(object):
 
     @cached_property
     def _known_tokens(self):
-        tokens = {  # TODO time may differ between file and parent folder, which will break path logic
+        tokens = {  # TODO time may differ between file and parent folder, which will break path logic (see issue #2)
             "created": self.mod_times[0],
             "changed": self.mod_times[1],
         }
