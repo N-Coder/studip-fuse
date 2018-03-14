@@ -10,6 +10,7 @@ from studip_api.downloader import Download
 from studip_api.model import *
 from studip_api.session import StudIPSession, log
 from studip_fuse.cache import DownloadTaskCache, ModelGetterCache, cached_task
+from studip_fuse.cache.circuit_breaker import NetworkCircuitBreaker
 
 
 @attr.s(hash=False)
@@ -17,11 +18,19 @@ class CachedStudIPSession(StudIPSession):
     cache_dir = attr.ib()  # type: str
 
     def __attrs_post_init__(self):
+        self.circuit_breaker = NetworkCircuitBreaker()
+        self._http_args["trace_configs"] = [self.circuit_breaker.trace_config]
+
         super().__attrs_post_init__()
+
         self.parser.SemesterFactory = Semester.get_or_create
         self.parser.CourseFactory = Course.get_or_create
         self.parser.FileFactory = File.get_or_create
         self.parser.FolderFactory = Folder.get_or_create
+
+        for func in (self.get_semesters, self.get_courses, self.get_course_files, self.get_folder_files):
+            func._may_create = self.circuit_breaker.may_create
+            func._exception_handler = self.circuit_breaker.exception_handler
 
     def save_model(self):
         start = time.perf_counter()
