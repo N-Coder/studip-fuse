@@ -63,7 +63,8 @@ class CachedStudIPSession(StudIPSession):
 
     @cached_task(cache_class=DownloadTaskCache)
     async def download_file_contents(self, studip_file, local_dest=None, chunk_size=1024 * 256):
-        # FIXME local_dest and chunk_size shouldn't be included in cache key
+        # FIXME await_complete in parent (and thus utime / setattrs) won't be called if download is forked / restarted
+        # FIXME forked download won't be marked as completed when finished
         if not local_dest:
             local_dest = os.path.join(self.cache_dir, studip_file.id)
 
