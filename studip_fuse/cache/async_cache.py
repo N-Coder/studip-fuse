@@ -13,8 +13,8 @@ from typing import Any, Dict
 from cached_property import cached_property
 from tabulate import tabulate
 
-__all__ = ["CoroCallCounter", "AsyncTaskCache", "AsyncTimedTaskCache", "DownloadTaskCache", "ModelGetterCache",
-           "cached_task"]
+__all__ = ["DecoratorClass", "CoroCallCounter", "AsyncTaskCache", "AsyncTimedTaskCache", "AsyncTimedFallbackTaskCache",
+           "DownloadTaskCache", "ModelGetterCache", "cached_task"]
 
 async_cache_log = logging.getLogger("studip_fuse.async_cache")
 
@@ -215,19 +215,19 @@ class AsyncTaskCache(DecoratorClass):
     def _create_new_cache_value(self, key, old_value, args, kwargs):
         return asyncio.ensure_future(self.__wrapped__(*args, **kwargs))
 
-    async def _get_or_create_cache_value(self, key, args, kwargs):
-        res = self._get_valid_cache_value(key)
+    async def _get_or_create_cache_value(self, key, func_args, func_kwargs, **validator_kwargs):
+        res = self._get_valid_cache_value(key, **validator_kwargs)
         if res is not self.CACHE_SENTINEL:
             self._hits += 1
             return await res
 
         async with self.__cache_lock:
-            res = self._get_valid_cache_value(key)
+            res = self._get_valid_cache_value(key, **validator_kwargs)
             if res is not self.CACHE_SENTINEL:
                 self._hits += 1
                 return await res
 
-            res = self._create_new_cache_value(key, res, args, kwargs)
+            res = self._create_new_cache_value(key, self._cache.get(key, self.CACHE_SENTINEL), func_args, func_kwargs)
             self._cache[key] = res
             self._misses += 1
             return await res
@@ -237,15 +237,33 @@ class AsyncTimedTaskCache(AsyncTaskCache):
     def __init__(self, user_func):
         super().__init__(user_func)
         self._cache_times = {}  # type: Dict[Any, int]
-        self._cache_fallbacks = {}  # type: Dict[Any, asyncio.Future]
-        self.cache_timeout = 600  # type: int
+        self.cache_timeout = 600  # type: int # TODO make configurable
 
-    def get_statistics(self):
-        return {
-            "fallback_cache_size": len(self._cache_fallbacks),
-            # further stats could be: average / max cache age, fallback / active cache intersection, ...
-            **super().get_statistics()
-        }
+    def _create_new_cache_value(self, key, old_value, args, kwargs):
+        value = super()._create_new_cache_value(key, old_value, args, kwargs)
+        self._cache_times[key] = time()
+        return value
+
+    def _is_valid_cache_value(self, key, val, ignore_timeout=False, **kwargs):
+        if super()._is_valid_cache_value(key, val, **kwargs):
+            if ignore_timeout:
+                return True
+            if not val.done():
+                return True  # pending tasks should not expire
+            return self._cache_times[key] - time() < self.cache_timeout
+        else:
+            return False
+
+
+class AsyncTimedFallbackTaskCache(AsyncTimedTaskCache):
+    def __init__(self, user_func):
+        super().__init__(user_func)
+        self._cache_fallbacks = {}  # type: Dict[Any, asyncio.Future]
+
+    def _create_new_cache_value(self, key, old_value, args, kwargs):
+        if self._is_valid_cache_value(key, old_value, ignore_timeout=True):
+            self._cache_fallbacks[key] = old_value
+        return super()._create_new_cache_value(key, old_value, args, kwargs)
 
     def _set_fallback_value(self, key, value, overwrite=True):
         if overwrite or self._cache_fallbacks.get(key, self.CACHE_SENTINEL) is self.CACHE_SENTINEL:
@@ -255,24 +273,18 @@ class AsyncTimedTaskCache(AsyncTaskCache):
     def _get_fallback_value(self, key):
         return self._cache_fallbacks.get(key, self.CACHE_SENTINEL)
 
-    def _get_any_value(self, key):
-        res = self._get_valid_cache_value(key, ignore_timeout=True)
+    def _get_any_value(self, key, **kwargs):
+        res = self._get_valid_cache_value(key, **kwargs)
         if res is not self.CACHE_SENTINEL:
             return res
         return self._cache_fallbacks.get(key, self.CACHE_SENTINEL)
 
-    def _create_new_cache_value(self, key, old_value, args, kwargs):
-        if self._is_valid_cache_value(key, old_value, ignore_timeout=True):
-            self._cache_fallbacks[key] = old_value
-        value = super()._create_new_cache_value(key, old_value, args, kwargs)
-        self._cache_times[key] = time()
-        return value
-
-    def _is_valid_cache_value(self, key, val, ignore_timeout=False, **kwargs):
-        if super()._is_valid_cache_value(key, val, **kwargs):
-            return ignore_timeout or self._cache_times[key] - time() < self.cache_timeout
-        else:
-            return False
+    def get_statistics(self):
+        return {
+            "fallback_cache_size": len(self._cache_fallbacks),
+            # further stats could be: average / max cache age, fallback / active cache intersection, ...
+            **super().get_statistics()
+        }
 
 
 class DownloadTaskCache(AsyncTaskCache):
@@ -306,7 +318,7 @@ class DownloadTaskCache(AsyncTaskCache):
         return super()._create_new_cache_value(key, old_value, args, kwargs)
 
 
-class ModelGetterCache(AsyncTaskCache):
+class ModelGetterCache(AsyncTimedFallbackTaskCache):
     def _make_key(self, args, kwargs):
         from studip_api.session import StudIPSession
         assert isinstance(args[0], StudIPSession)
