@@ -54,6 +54,16 @@ class CachedStudIPSession(StudIPSession):
                 f.import_cache(d, update, create_future=self._loop.create_future)
         return "loaded, took %ss" % (time.perf_counter() - start)
 
+    def model_cache_stats(self):
+        return {
+            "known_semesters": len(Semester.INSTANCES),
+            "known_courses": len(Course.INSTANCES),
+            "known_files": len(File.INSTANCES),
+            "indexed_semesters": len(self.get_courses._cache),
+            "indexed_courses": len(self.get_course_files._cache),
+            "indexed_folders": len(self.get_folder_files._cache)
+        }
+
     @cached_task(cache_class=ModelGetterCache)
     async def get_semesters(self):
         return await super().get_semesters()
