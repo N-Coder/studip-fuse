@@ -1,4 +1,4 @@
-from flask import Flask
+from flask import Flask, jsonify
 
 from studip_fuse.__main__.fs_driver import FUSEView
 
@@ -12,10 +12,15 @@ def run(fuseview):
     app.run()
 
 
-@app.route("/show_caches")
-def show_caches():
+@app.route("/cache_stats")
+def cache_stats():
     from studip_fuse.cache import AsyncTaskCache
     return AsyncTaskCache.format_all_statistics()
+
+
+@app.route("/model_stats")
+def model_stats():
+    return jsonify(fuseview_inst.session.model_cache_stats())
 
 
 @app.route("/clear_caches", methods=["POST"])
