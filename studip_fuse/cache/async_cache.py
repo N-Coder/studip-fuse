@@ -310,15 +310,17 @@ class DownloadTaskCache(AsyncTaskCache):
             return is_valid  # not a Download or still in progress, rely on result of super method
 
     def _create_new_cache_value(self, key, old_value, args, kwargs):
-        from studip_api.downloader import Download
+        from studip_api.downloader import Download, log
 
         if old_value is not self.CACHE_SENTINEL:
-            assert asyncio.isfuture(old_value) and old_value.done() \
-                   and not old_value.exception() and not old_value.cancelled(), \
-                "Can't create a new cached task when old task is in invalid state: %s" % old_value
-            assert isinstance(old_value.result(), Download), \
-                "Expected result of old cached task to be a Download, but it was %s" % old_value.result()
-            return asyncio.ensure_future(old_value.result().fork())
+            assert asyncio.isfuture(old_value) and old_value.done(), \
+                "Can't create a new cached download task when old task is in invalid state: %s" % old_value
+            if not old_value.exception() and not old_value.cancelled():
+                assert isinstance(old_value.result(), Download), \
+                    "Expected result of old cached download task to be a Download, but it was %s" % old_value.result()
+                return asyncio.ensure_future(old_value.result().fork())
+            else:
+                log.debug("Previous download for %s failed, retrying task %s instead of forking.", key, old_value)
 
         return super()._create_new_cache_value(key, old_value, args, kwargs)
 
