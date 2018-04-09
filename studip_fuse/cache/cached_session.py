@@ -55,8 +55,9 @@ class CachedStudIPSession(StudIPSession):
             with open(path, "wt") as f:
                 json.dump(obj_data, f)
 
-        await self._loop.call_soon_threadsafe(save, data)
+        await self._loop.run_in_executor(None, save, data)
 
+        log.info("Saved model and cache data, export took %ss", delta)
         return "stored, took %ss" % delta
 
     async def load_model(self, update=False, path=None):
@@ -67,7 +68,7 @@ class CachedStudIPSession(StudIPSession):
             with open(path, "rt") as f:
                 return json.load(f)
 
-        data = await self._loop.call_soon_threadsafe(load)
+        data = await self._loop.run_in_executor(None, load)
 
         # this is an async function, preventing all other async functions from modifying data while loading the obj
         start = time.perf_counter()
@@ -78,6 +79,7 @@ class CachedStudIPSession(StudIPSession):
             func.import_cache(fun_data, update, create_future=self._loop.create_future)
         delta = time.perf_counter() - start
 
+        log.info("Loaded model and cache data, import took %ss", delta)
         return "loaded, took %ss" % delta
 
     def model_cache_stats(self):
