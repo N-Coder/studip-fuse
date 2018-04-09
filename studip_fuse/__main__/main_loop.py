@@ -89,6 +89,7 @@ def session_context(args, http_args, loop, future: concurrent.futures.Future):
 
         future.check_cancelled()
         loop.run_until_complete(task)
+        loop.run_until_complete(session.load_model(update=True))
 
         yield session
     finally:
