@@ -35,6 +35,12 @@ loggers:
   studip_fuse.async_cache:
     level: INFO
 
+  studip_fuse.cache.circuit_breaker:
+    level: INFO
+
+  studip_api.async_delay:
+    level: INFO
+
   studip_fuse.real_path.resolve:
     level: INFO
 
