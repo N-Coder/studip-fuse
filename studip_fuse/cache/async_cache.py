@@ -255,7 +255,7 @@ class AsyncTimedTaskCache(AsyncTaskCache):
                 return True
             if not val.done():
                 return True  # pending tasks should not expire
-            return self._cache_times[key] - time() < self.cache_timeout
+            return key in self._cache_times and self._cache_times[key] - time() < self.cache_timeout
         else:
             return False
 
@@ -381,6 +381,7 @@ class ModelGetterCache(AsyncTimedFallbackTaskCache):
         for k, v in data.items():
             fut = create_future()
             fut.set_result(conv(v))
+            # TODO set timestamp for imported data
             if update:
                 self._cache[k] = fut
             else:
