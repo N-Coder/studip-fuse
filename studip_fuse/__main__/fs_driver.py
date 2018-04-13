@@ -229,6 +229,8 @@ class FUSEView(object):
             raise OSError(errno.EISDIR)
         else:
             download = self.schedule_async(resolved_real_file.open_file(flags)).result()
+            if os.name == 'nt' and not flags & getattr(os, "O_TEXT", 16384):
+                flags |= os.O_BINARY
             fileno = os.open(download.local_path, flags)
             self.open_files[fileno] = download
             return fileno
