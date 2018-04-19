@@ -19,7 +19,7 @@ from more_itertools import one
 from studip_api.downloader import Download
 from studip_fuse.__main__.main_loop import main_loop
 from studip_fuse.__main__.thread_util import ThreadSafeDefaultDict, await_loop_thread_shutdown
-from studip_fuse.cache import CachedStudIPSession, cached_task
+from studip_fuse.cache import CachedStudIPSession
 from studip_fuse.cache.circuit_breaker import CircuitBreakerOpenException
 from studip_fuse.path import RealPath, VirtualPath, path_name
 
@@ -196,7 +196,6 @@ class FUSEView(object):
         task = self.schedule_async(coro)
         return task.result()
 
-    @cached_task()
     async def _aresolve(self, path: str) -> RealPath:
         resolved_real_file = await self.root_rp.resolve(path)
         if not resolved_real_file:
@@ -207,7 +206,6 @@ class FUSEView(object):
     def readdir(self, path, fh) -> List[str]:
         return self.schedule_async(self._areaddir(path)).result()
 
-    @cached_task()
     async def _areaddir(self, path) -> List[str]:
         resolved_real_file = await self.root_rp.resolve(path)
         if not resolved_real_file:
@@ -259,7 +257,7 @@ class FUSEView(object):
     def get_content_task(self, path) -> asyncio.Future:
         realpath = self._resolve(path)
         if realpath.is_folder:
-            return realpath.list_contents.get_cached_value()
+            return realpath.list_contents(_AsyncCache__only_cached=True)
 
         else:
             file = one(realpath.generating_vps)._file
@@ -268,7 +266,7 @@ class FUSEView(object):
                 download = self.schedule_async(realpath.open_file(os.O_RDONLY)).result()
                 return download.completed
             else:
-                download_future = self.session.download_file_contents.get_cached_value(file)
+                download_future = self.session.download_file_contents(file, _AsyncCache__only_cached=True)
                 if isinstance(download_future, asyncio.Future) and download_future.done() \
                         and not download_future.cancelled() and not download_future.exception():
                     # if the download was already started, return the download.completed future tracking download progress
