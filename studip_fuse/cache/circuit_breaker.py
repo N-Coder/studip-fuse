@@ -1,8 +1,10 @@
+import errno
 import logging
 import operator
 import textwrap
 from enum import IntEnum
 from functools import reduce
+from posix import strerror
 from time import time
 from types import SimpleNamespace
 from typing import Any, List, NamedTuple, Union
@@ -82,8 +84,9 @@ class HealthCount(object):
         return HealthCount(0, 0, 0, 0)
 
 
-class CircuitBreakerOpenException(Exception):
-    pass
+class CircuitBreakerOpenException(OSError):
+    def __init__(self):
+        super(CircuitBreakerOpenException, self).__init__(errno.EHOSTUNREACH, strerror(errno.EHOSTUNREACH))
 
 
 # noinspection PyMethodOverriding
