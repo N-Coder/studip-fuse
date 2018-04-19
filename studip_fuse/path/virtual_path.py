@@ -76,26 +76,24 @@ class VirtualPath(object):
             if self._course:  # everything is already known, no options on this level
                 return [self._sub_path()]
             elif self._semester:
-                return [self._sub_path(new_known_data={Course: c})
-                        for c in await self.session.get_courses(self._semester)]
+                return [self._sub_path(new_known_data={Course: course})
+                        for course in await self.session.get_courses(self._semester)]
             else:
                 list = []
-                # XXX python 3.5 doesn't support await inside list comprehensions
-                # using `as_completed`, first schedule `get_courses` for all `s`, then await the results
-                # if `get_courses` would be directly awaited, scheduling and execution would be sequential
-                for fcs in as_completed([
-                    self.session.get_courses(s)
-                    for s in await self.session.get_semesters()
-                ]):
-                    for course in await fcs:
-                        list.append(self._sub_path(new_known_data={Course: course}))
+                semesters = await self.session.get_semesters()
+                # start all the dependant tasks now and await them later
+                courses_futures = {semester: self.session.get_courses(semester) for semester in semesters}
+                for semester, courses_future in courses_futures.items():
+                    for course in await courses_future:
+                        list.append(self._sub_path(new_known_data={Semester: semester, Course: course}))
                 return list
 
         elif Semester in self._content_options:
             if self._semester:  # everything is already known, no options on this level
                 return [self._sub_path()]
-            return [self._sub_path(new_known_data={Semester: s})
-                    for s in await self.session.get_semesters()]
+            else:
+                return [self._sub_path(new_known_data={Semester: semester})
+                        for semester in await self.session.get_semesters()]
 
         else:
             assert not self._content_options, "unknown content options %s for virtual path %s" % \
@@ -106,42 +104,41 @@ class VirtualPath(object):
         assert self.is_folder, "_list_contents_file_options called on non-folder %s" % self
 
         if self._file:
-            if self._loop_over_path and self._file.is_folder():  # loop over contents of one folder #1
-                files = [f
-                         for f in (await self.session.get_folder_files(self._file)).contents]
-
+            if self._loop_over_path and self._file.is_folder:  # loop over contents of one folder
+                data = [{File: file} for file in await self.session.get_folder_files(self._file)]
             else:  # everything is already known, no options on this level
                 return [self._sub_path()]
+
         else:  # all folders still possible
             if self._course:
-                files = [f
-                         for f in (await self.session.get_course_files(self._course)).contents]
-            elif self._semester:
-                files = []
-                # XXX python 3.5 doesn't support await inside list comprehensions
-                for ffs in as_completed([
-                    self.session.get_course_files(c)
-                    for c in await self.session.get_courses(self._semester)
-                ]):
-                    for folder in await ffs:
-                        files += folder.contents
-            else:
-                files = []
-                # XXX python 3.5 doesn't support await inside list comprehensions
-                for fcs in as_completed([
-                    self.session.get_courses(s)
-                    for s in await self.session.get_semesters()
-                ]):
-                    # the following await lead to partially sequential execution in very rare cases
-                    for course in await fcs:
-                        for ffs in as_completed([
-                            self.session.get_course_files(course)
-                        ]):
-                            for folder in await ffs:
-                                files += folder.contents
+                data = [{File: await self.session.get_course_root_file(self._course)}]
 
-        return [self._sub_path(new_known_data={File: f}, increment_path_segments=not self._loop_over_path)
-                for f in files]
+            elif self._semester:
+                data = []
+                courses = await self.session.get_courses(self._semester)
+                # start all the dependant tasks now and await them later
+                file_futures = {course: self.session.get_course_root_file(course) for course in courses}
+                for course, file_future in file_futures.items():
+                    data.append({Course: course, File: await file_future})
+
+            else:
+                data = []
+                # start all the dependant tasks now and await them later
+                semesters = await self.session.get_semesters()
+                courses_futures = {semester: self.session.get_courses(semester) for semester in semesters}
+                file_futures = {}
+                for courses_future in as_completed(courses_futures.values()):
+                    for course in await courses_future:
+                        if course not in file_futures:
+                            file_futures[course] = self.session.get_course_root_file(course)
+
+                # all requests were started, now await them in order
+                for semester, courses_future in courses_futures.values():
+                    for course in await courses_future:
+                        data.append({Semester: semester, Course: course, File: await file_futures[course]})
+
+        return [self._sub_path(new_known_data=d, increment_path_segments=not self._loop_over_path)
+                for d in data]
 
     def access(self, mode):
         pass
