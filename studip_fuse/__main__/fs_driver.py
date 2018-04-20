@@ -249,7 +249,6 @@ class FUSEView(object):
                 return "failed".encode()
             else:
                 return "available".encode()
-            # TODO missing states: "stale",
         elif name == "user.studip-fuse.contents-exception":
             coro = self.get_content_task(path)
             if not isinstance(coro, asyncio.Future):

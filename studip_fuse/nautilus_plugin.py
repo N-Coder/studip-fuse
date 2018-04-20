@@ -56,6 +56,7 @@ else:
                 "pending": "synchronizing",
                 "failed": "unreadable",
                 "available": "default",
+                # TODO missing states: "stale",
             }.get(status, None)
             # TODO mark as unreadable if offline, update emblems on change
             if emblem:
