@@ -68,6 +68,7 @@ def is_permanent_exception(exc):
 @attr.s(frozen=True, slots=True)
 class CachedValue(object):
     future = attr.ib(validator=optional(instance_of(Future)))  # type: Optional[Future]
+    # XXX time is the time of creation, not the time of completion
     time = attr.ib(default=Factory(lambda: asyncio.get_event_loop().time()))  # type: float
 
     def is_available(self):
@@ -150,7 +151,7 @@ class AsyncCache(object):
 
     async def __attempt_await_new_task(self, key, args, kwargs, trace):
         # try to get a new value
-        attempts_exc_history = []  # type: List[Future]
+        attempts_exc_history = []  # type: List[CachedValue]
         attempts_timed_out = False
         cache_value = None
         context = {
@@ -170,24 +171,31 @@ class AsyncCache(object):
                     and len(attempts_exc_history) < self.max_load_attempts:
 
                 log.debug("%s %s started task %s[%s] with (*%s, **%s)", type(self).__name__, id(self), self.wrapped_function, key, args, kwargs)
-                new_task = self.start_task(**context)
+                cache_value = self.make_cache_value(self.start_task(**context), **context)
                 try:
-                    await asyncio.shield(new_task)  # protected from timeout cancellation
+                    await asyncio.shield(cache_value.future)  # protected from timeout cancellation
                 except BaseException:
                     if timer.expired:
                         log.debug("%s %s task %s[%s] timed out", type(self).__name__, id(self), self.wrapped_function, key, exc_info=True)
-                        self.cache[key] = self.make_cache_value(new_task, **context)  # let task finish in the background
-                        attempts_exc_history.append(new_task)  # might not be done yet, but still record
+                        self.cache[key] = cache_value  # let task finish in the background
+                        attempts_exc_history.append(cache_value)  # might not be done yet, but still record
                         attempts_timed_out = True
                         break
                     else:
-                        log.debug("%s %s task %s[%s] failed", type(self).__name__, id(self), self.wrapped_function, key, exc_info=True)
-                        attempts_exc_history.append(new_task)
-                        continue
+                        if cache_value.is_valid():  # the raised exception is accepted as a result
+                            log.debug("%s %s task %s[%s] raised an exception that was a valid result",
+                                      type(self).__name__, id(self), self.wrapped_function, key, exc_info=True)
+                            self.cache[key] = cache_value
+                            raise cache_value.future.exception()
+                        else:  # the operation failed temporarily, retry
+                            log.debug("%s %s task %s[%s] failed", type(self).__name__, id(self), self.wrapped_function, key, exc_info=True)
+                            attempts_exc_history.append(cache_value)
+                            continue
                 else:  # no exception raised from `await`
                     # task was successful, so remove indirection to current task and store value
                     log.debug("%s %s task %s[%s] succeeded", type(self).__name__, id(self), self.wrapped_function, key)
-                    cache_value = self.cache[key] = self.make_cache_value(new_task, **context)
+                    assert cache_value.is_valid()
+                    self.cache[key] = cache_value
                     if self.on_new_value_fetched:
                         self.on_new_value_fetched(cache_value, **context)
                     break
@@ -257,10 +265,10 @@ class AsyncCache(object):
         log.warning("%s %s request %s[%s] failed: %s", type(self).__name__, id(self), self.wrapped_function, key, cache_msg)
         if attempts_exc_history:
             # if there is anything usable in the recent exc history, use that instead of timeout / network down
-            for f in reversed(attempts_exc_history):
-                if f.done() and not f.cancelled() and f.exception():
-                    oserrno, errstr = guess_errno_from_exception(f)
-                    raise CachedValueNotAvailableError(oserrno, errstr, cache_msg) from f.exception()
+            for cv in reversed(attempts_exc_history):
+                if cv.future.done() and not cv.future.cancelled() and cv.future.exception():
+                    oserrno, errstr = guess_errno_from_exception(cv.future)
+                    raise CachedValueNotAvailableError(oserrno, errstr, cache_msg) from cv.future.exception()
 
         if attempts_timed_out:
             raise CachedValueNotAvailableError(errno.ETIMEDOUT, cache_msg)
