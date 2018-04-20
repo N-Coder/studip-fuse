@@ -13,7 +13,7 @@ from studip_api.async_delay import DeferredTask, DelayLatch, await_idle
 from studip_api.downloader import Download
 from studip_api.model import Course, File, ModelClass, Semester, register_datetime_converter, register_forwardref_converter, register_model_converter
 from studip_api.session import StudIPSession, log
-from studip_fuse.cache.async_cache import AsyncDownloadCache, AsyncModelCache
+from studip_fuse.cache.async_cache import AsyncDownloadCache, AsyncModelCache, is_permanent_exception
 from studip_fuse.cache.circuit_breaker import NetworkCircuitBreaker
 
 CACHED_GETTERS = ("get_semesters", "get_courses", "get_course_root_file", "get_folder_files")
@@ -58,18 +58,22 @@ class CachedStudIPSession(StudIPSession):
 
         super().__attrs_post_init__()
 
+        def may_attempt(attempts_history, **context):
+            if len(attempts_history) > 0 and is_permanent_exception(attempts_history[-1]):
+                return False
+            else:
+                return self.circuit_breaker.allow_request()
+
         for getter in CACHED_GETTERS:
             wrapped = getattr(self, getter)
             wrapper = AsyncModelCache(
-                wrapped_function=wrapped,
-                may_attempt=lambda _, __: self.circuit_breaker.allow_request(),
-                on_new_value_fetched=lambda _: self._persist_caches_task.defer()
+                wrapped_function=wrapped, may_attempt=may_attempt,
+                on_new_value_fetched=lambda *_, **__: self._persist_caches_task.defer()
             )
             functools.update_wrapper(wrapper, wrapped)
             setattr(self, getter, wrapper)
         self.download_file_contents = AsyncDownloadCache(
-            self.download_file_contents,
-            may_attempt=lambda _, __: self.circuit_breaker.allow_request()
+            self.download_file_contents, may_attempt=may_attempt
         )
 
     async def close(self):
