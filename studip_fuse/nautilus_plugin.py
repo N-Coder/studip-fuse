@@ -60,3 +60,7 @@ else:
             # TODO mark as unreadable if offline, update emblems on change
             if emblem:
                 file.add_emblem(emblem)
+
+# TODO add appindicator and notifications, error reporting
+# http://candidtim.github.io/appindicator/2014/09/13/ubuntu-appindicator-step-by-step.html
+# https://lazka.github.io/pgi-docs/#Notify-0.7/classes/Notification.html

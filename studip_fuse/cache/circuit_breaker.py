@@ -7,7 +7,7 @@ from functools import reduce
 from posix import strerror
 from time import time
 from types import SimpleNamespace
-from typing import Any, List, NamedTuple, Union
+from typing import List, NamedTuple, Union
 
 import attr
 from aiohttp import ClientSession, TraceConfig, TraceRequestEndParams, TraceRequestExceptionParams, TraceRequestStartParams
@@ -156,12 +156,6 @@ class NetworkCircuitBreaker(object):
             # this thread wins the race to re-open the circuit - it resets the start time for the sleep window
             self.status = Status.OPEN
             self.opened = t
-
-    def exception_handler(self, exc_type, exception, traceback) -> Any:
-        raise exception
-
-    def may_create(self, key, args, kwargs) -> bool:
-        return self.allow_request()
 
     def on_event(self, *args, **kwargs):
         event = Event(*args, **kwargs)
