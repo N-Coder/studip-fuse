@@ -46,6 +46,11 @@ def guess_errno_from_exception(exc: Union[Future, Exception]):
             return errno.ECONNRESET, msg
         elif isinstance(exc, (socket.gaierror, socket.herror)):
             return errno.EHOSTUNREACH, msg
+        elif isinstance(exc, aiohttp.ClientResponseError):
+            if exc.code == 403:
+                return errno.EACCES, exc.message
+            elif exc.code in [404, 410]:
+                return errno.ENOENT, exc.message
         elif isinstance(exc, OSError) and exc.errno > 0:
             return exc.errno, msg
         exc = exc.__cause__
@@ -342,7 +347,10 @@ class CachedDownload(CachedValue):
                (super().is_valid() and not self.future.result().completed.done())
 
     def is_valid(self):
-        if not super().is_valid():
+        if self.future is None or not self.future.done() or self.future.cancelled():
             return False
-        download_completed = self.future.result().completed
-        return download_completed.done() and not (download_completed.cancelled() or download_completed.exception())
+        if self.future.exception():
+            return is_permanent_exception(self.future.exception())
+        else:
+            download_completed = self.future.result().completed
+            return download_completed.done() and not (download_completed.cancelled() or download_completed.exception())
