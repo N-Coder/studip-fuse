@@ -119,7 +119,6 @@ class CachedStudIPSession(StudIPSession):
         #     getattr(self, getter).update(self.cache_converter.structure(data[getter], AbstractCache))
 
     async def download_file_contents(self, studip_file, local_dest=None, chunk_size=1024 * 256):
-        # FIXME add explicit calls to circuit breaker to individual download parts, potentially allowing retrying failed parts
         if not local_dest:
             local_dest = os.path.join(self.cache_dir, studip_file.id)
 

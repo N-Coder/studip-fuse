@@ -39,10 +39,9 @@ def parse_args():
 
     http_opts = opts_parser.add_argument_group("HTTP Client Options")
 
-    # FIXME timeouts include queued waiting time for connection from empty pool
     http_opts.add_argument("--read-timeout", action="store", help="cumulative request operations timeout in seconds",
                            default=30, type=float)  # (connect/queue, request, redirects, responses, data consuming)
-    http_opts.add_argument("--conn-timeout", action="store", help="timeout for connection establishing in seconds",
+    http_opts.add_argument("--conn-timeout", action="store", help="timeout for connection acquiring in seconds",
                            default=30, type=float)  # includes waiting for a pooled connection from an empty pool
 
     http_opts.add_argument("--keepalive-timeout", action="store",

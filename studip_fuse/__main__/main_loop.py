@@ -77,12 +77,6 @@ def session_context(args, http_args, loop, future: concurrent.futures.Future):
     session = CachedStudIPSession(
         loop=loop, studip_base=args.studip, sso_base=args.sso, cache_dir=args.cache, http_args=http_args)
     try:
-        # TODO make login optional at startup if not currently online
-        # TODO restore cached model data on startup => refactor
-        #       1) startup tasks (e.g. restore model),
-        #       2) background tasks (e.g. reset semester selection, save model),
-        #       3) required/dependency tasks (e.g. login) and
-        #       4) shutdown tasks (e.g. reset semester selection, save model)
         coro = session.do_login(user_name=args.user, password=args.get_password())
         task = asyncio.ensure_future(coro, loop=loop)
         future.add_done_callback(lambda f: task.cancel() if f.cancelled() else None)
