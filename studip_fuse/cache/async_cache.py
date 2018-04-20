@@ -55,7 +55,7 @@ def guess_errno_from_exception(exc: Union[Future, Exception]):
             return exc.errno, msg
         exc = exc.__cause__
 
-    return errno.EINVAL, "error with unknown error code"
+    return errno.EINVAL, "error with unknown error code: %s" % msg
 
 
 def is_permanent_exception(exc):
