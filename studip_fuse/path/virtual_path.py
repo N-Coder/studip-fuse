@@ -145,7 +145,9 @@ class VirtualPath(object):
 
     def getattr(self):
         d = dict(st_ino=hash(self.partial_path), st_nlink=1,
-                 st_mode=(S_IFDIR if self.is_folder else S_IFREG) | S_IRUSR | S_IRGRP | S_IROTH)
+                 st_mode=S_IFDIR if self.is_folder else S_IFREG)
+        if self.is_folder or self._file.is_accessible:
+            d["st_mode"] |= S_IRUSR | S_IRGRP | S_IROTH
         if hasattr(os, "getuid"):
             d["st_uid"] = os.getuid()
         if hasattr(os, "getgid"):
