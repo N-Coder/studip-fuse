@@ -64,6 +64,7 @@ class CachedStudIPSession(StudIPSession):
             else:
                 return self.circuit_breaker.allow_request()
 
+        # FIXME cached instances of ModelClass won't be updated
         for getter in CACHED_GETTERS:
             wrapped = getattr(self, getter)
             wrapper = AsyncModelCache(
