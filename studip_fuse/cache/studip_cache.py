@@ -154,3 +154,17 @@ class CachedDownload(CachedValue):
         else:
             download_completed = self.future.result().completed
             return download_completed.done() and not (download_completed.cancelled() or download_completed.exception())
+
+    def should_reattempt(self):
+        if self.future is None:
+            return True
+        # is_pending might still be true, as it also includes the content download for CachedDownloads
+        assert self.future.done(), "Can't reattempt while old future %s is still pending" % self.future
+
+        if self.future.cancelled():
+            return True
+        elif self.future.exception():
+            return not (is_permanent_exception(self.future.exception()) or isinstance(self.future.exception(), CachedValueNotAvailableError))
+        else:
+            # Download has been started, don't start a new one
+            return False

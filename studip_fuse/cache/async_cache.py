@@ -44,7 +44,7 @@ class CachedValue(object):
     def should_reattempt(self) -> bool:
         if self.future is None:
             return True
-        assert self.future.done(), "Can't reattempt while old future %s is still pending" % self.future
+        assert not self.is_pending(), "Can't reattempt while old future %s is still pending" % self.future
 
         # don't reattempt execution if wrapped task failed after already doing multiple attempts
         return not (self.is_valid() or isinstance(self.future.exception(), CachedValueNotAvailableError))
