@@ -25,6 +25,7 @@ if __name__ == "__main__":
             "fusepy",
             "argparse",
             "appdirs",
+            "async-timeout",
             # "sh",
             "pyyaml",
             "frozendict",
