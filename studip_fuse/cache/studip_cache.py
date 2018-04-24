@@ -113,7 +113,7 @@ class AsyncDownloadCache(AsyncCache):
         arguments.apply_defaults()
         return arguments.arguments["studip_file"], arguments.arguments["local_dest"]
 
-    def start_task(self, func_args, func_kwargs, old_value=None, **context):
+    def start_task(self, func_args, func_kwargs, old_value=None, _key=None, **context):
         from studip_api.downloader import log, Download
 
         if old_value and old_value.is_available():
@@ -125,7 +125,7 @@ class AsyncDownloadCache(AsyncCache):
                     "Expected result of old cached download task to be a Download, but it was %s" % old_value.result()
                 return asyncio.ensure_future(old_task.result().fork())
             else:
-                log.debug("Previous download for %s failed, retrying task %s instead of forking.", key, old_value)
+                log.debug("Previous download for %s failed, retrying task %s instead of forking.", _key, old_value)
 
         return super().start_task(func_args, func_kwargs)
 
