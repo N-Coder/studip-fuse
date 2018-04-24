@@ -1,26 +1,19 @@
 import asyncio
-import concurrent.futures
 import errno
 import functools
-import inspect
 import logging
-import socket
 from asyncio import Future
 from collections import defaultdict
-from inspect import BoundArguments
-from itertools import chain
 from posix import strerror
-from typing import Any, Callable, Dict, List, Optional, Union
+from typing import Any, Callable, Dict, List, Optional
 
-import aiohttp
 import attr
 from async_timeout import timeout
 from attr import Factory
 from attr.validators import instance_of, optional
 from cached_property import cached_property
 
-__all__ = ["KeyType", "CachedValueNotAvailableError", "guess_errno_from_exception", "CachedValue", "AsyncCache",
-           "cached_task", "AsyncModelCache", "AsyncDownloadCache", "CachedDownload"]
+__all__ = ["KeyType", "CachedValueNotAvailableError", "CachedValue", "AsyncCache", "cached_task"]
 log = logging.getLogger("studip_fuse.async_cache")
 KeyType = str
 
@@ -30,44 +23,6 @@ class CachedValueNotAvailableError(OSError):
         if not errstr:
             errstr = strerror(errno)
         super(CachedValueNotAvailableError, self).__init__(errno, errstr, cache_msg)
-
-
-def guess_errno_from_exception(exc: Union[Future, Exception]):
-    if isinstance(exc, Future):
-        exc = exc.exception()
-
-    msg = str(exc)
-    while exc:
-        if isinstance(exc, concurrent.futures.TimeoutError):
-            return errno.ETIMEDOUT, msg
-        elif isinstance(exc, concurrent.futures.CancelledError):
-            return errno.ECANCELED, msg
-        elif isinstance(exc, aiohttp.ServerDisconnectedError):
-            return errno.ECONNRESET, msg
-        elif isinstance(exc, (socket.gaierror, socket.herror)):
-            return errno.EHOSTUNREACH, msg
-        elif isinstance(exc, aiohttp.ClientResponseError):
-            if exc.code == 403:
-                return errno.EACCES, exc.message
-            elif exc.code in [404, 410]:
-                return errno.ENOENT, exc.message
-        elif isinstance(exc, OSError) and exc.errno > 0:
-            return exc.errno, msg
-        exc = exc.__cause__
-
-    return errno.EINVAL, "error with unknown error code: %s" % msg
-
-
-def is_permanent_exception(exc):
-    if isinstance(exc, Future):
-        exc = exc.exception()
-
-    if isinstance(exc, aiohttp.ClientResponseError) and 400 <= exc.code < 500:
-        return True
-    elif isinstance(exc, OSError) and exc.errno in (errno.EEXIST, errno.EISDIR, errno.ENOTDIR, errno.ENOENT):
-        return True
-    else:
-        return False
 
 
 @attr.s(frozen=True, slots=True)
@@ -83,12 +38,16 @@ class CachedValue(object):
         return self.future is not None and not self.future.done()
 
     def is_valid(self) -> bool:
-        if self.future is None or not self.future.done() or self.future.cancelled():
-            return False
-        if self.future.exception():
-            return is_permanent_exception(self.future.exception())
-        else:
+        return self.future is not None and self.future.done() \
+               and not (self.future.cancelled() or self.future.exception())
+
+    def should_reattempt(self) -> bool:
+        if self.future is None:
             return True
+        assert self.future.done(), "Can't reattempt while old future %s is still pending" % self.future
+
+        # don't reattempt execution if wrapped task failed after already doing multiple attempts
+        return not (self.is_valid() or isinstance(self.future.exception(), CachedValueNotAvailableError))
 
     def is_fresh(self, timeout: float) -> bool:
         return self.future is not None and timeout >= 0 and asyncio.get_event_loop().time() - self.time < timeout
@@ -132,7 +91,6 @@ class AsyncCache(object):
         return CachedValue(None)
 
     async def __await_cached_task(self, key, trace):
-        # try to use valid and fresh cached value
         cached_task = self.cache[key]
         cached_task_is_fresh = cached_task.is_fresh(self.cache_timeout)
         if cached_task.is_pending():
@@ -155,7 +113,6 @@ class AsyncCache(object):
         return None
 
     async def __attempt_await_new_task(self, key, args, kwargs, trace):
-        # try to get a new value
         attempts_exc_history = []  # type: List[CachedValue]
         attempts_timed_out = False
         cache_value = None
@@ -175,31 +132,50 @@ class AsyncCache(object):
             while (not self.may_attempt or self.may_attempt(**context)) \
                     and len(attempts_exc_history) < self.max_load_attempts:
 
-                log.debug("%s %s started task %s[%s] with (*%s, **%s)", type(self).__name__, id(self), self.wrapped_function, key, args, kwargs)
+                log.debug("%s %s started task %s[%s] with (*%s, **%s)",
+                          type(self).__name__, id(self), self.wrapped_function, key, args, kwargs)
                 cache_value = self.make_cache_value(self.start_task(**context), **context)
                 try:
                     await asyncio.shield(cache_value.future)  # protected from timeout cancellation
                 except BaseException:
                     if timer.expired:
-                        log.debug("%s %s task %s[%s] timed out", type(self).__name__, id(self), self.wrapped_function, key, exc_info=True)
+                        log.debug("%s %s task %s[%s] timed out",
+                                  type(self).__name__, id(self), self.wrapped_function, key, exc_info=True)
                         self.cache[key] = cache_value  # let task finish in the background
                         attempts_exc_history.append(cache_value)  # might not be done yet, but still record
                         attempts_timed_out = True
                         break
                     else:
-                        if cache_value.is_valid():  # the raised exception is accepted as a result
-                            log.debug("%s %s task %s[%s] raised an exception that was a valid result",
-                                      type(self).__name__, id(self), self.wrapped_function, key, exc_info=True)
-                            self.cache[key] = cache_value
-                            raise cache_value.future.exception()
-                        else:  # the operation failed temporarily, retry
-                            log.debug("%s %s task %s[%s] failed", type(self).__name__, id(self), self.wrapped_function, key, exc_info=True)
-                            attempts_exc_history.append(cache_value)
-                            continue
-                else:  # no exception raised from `await`
-                    # task was successful, so remove indirection to current task and store value
-                    log.debug("%s %s task %s[%s] succeeded", type(self).__name__, id(self), self.wrapped_function, key)
-                    assert cache_value.is_valid()
+                        pass  # exception will be handled later
+
+                # XXX for Downloads is_pending is still True after the await here completed, so we can't make
+                # any assumptions about is_valid here and only use should_reattempt
+
+                if cache_value.should_reattempt():  # the operation failed temporarily, retry
+                    if cache_value.future.cancelled():
+                        log.debug("%s %s task %s[%s] was cancelled and should reattempt",
+                                  type(self).__name__, id(self), self.wrapped_function, key)
+                    elif cache_value.future.exception():
+                        log.debug("%s %s task %s[%s] raised an exception and should reattempt",
+                                  type(self).__name__, id(self), self.wrapped_function, key, exc_info=cache_value.future.exception())
+                    else:
+                        log.debug("%s %s task %s[%s] returned an invalid result and should reattempt",
+                                  type(self).__name__, id(self), self.wrapped_function, key)
+
+                    attempts_exc_history.append(cache_value)
+                    continue
+
+                else:  # the returned value / raised exception is accepted as a result
+                    if cache_value.future.cancelled():
+                        log.debug("%s %s task %s[%s] was cancelled, which was accepted as a valid result",
+                                  type(self).__name__, id(self), self.wrapped_function, key)
+                    elif cache_value.future.exception():
+                        log.debug("%s %s task %s[%s] raised an exception, which was accepted as a valid result",
+                                  type(self).__name__, id(self), self.wrapped_function, key, exc_info=cache_value.future.exception())
+                    else:
+                        log.debug("%s %s task %s[%s] returned a valid result",
+                                  type(self).__name__, id(self), self.wrapped_function, key)
+
                     self.cache[key] = cache_value
                     if self.on_new_value_fetched:
                         self.on_new_value_fetched(cache_value, **context)
@@ -212,7 +188,6 @@ class AsyncCache(object):
         return cache_value, attempts_exc_history, attempts_timed_out
 
     def __get_fallback_task(self, key, trace):
-        # fallback to a previously valid, but expired value
         fallback_task = self.fallbacks[key]
         fallback_task_is_fresh = fallback_task.is_fresh(self.fallback_timeout)
         fallback_task_is_valid = fallback_task.is_valid()
@@ -227,6 +202,12 @@ class AsyncCache(object):
             trace("Fallback task was never set.")
         else:
             trace("Fallback task is invalid and expired.")
+
+    def no_cache_value_error(self, attempts_exc_history, attempts_timed_out, cache_msg):
+        if attempts_timed_out:
+            raise CachedValueNotAvailableError(errno.ETIMEDOUT, cache_msg)
+        else:
+            raise CachedValueNotAvailableError(errno.ENETDOWN, cache_msg)
 
     def __call__(self, *args, __only_cached=False, **kwargs):
         if __only_cached:
@@ -243,21 +224,24 @@ class AsyncCache(object):
         trace_data = []
         trace = lambda *x: trace_data.append(x)
 
-        # try the various methods for obtaining a value, which raise StopIteration to report a valid value
+        # try the various methods for obtaining a value, which return the valid CachedValue if found / obtained
+        # try to use valid and fresh cached value
         cache_value = await self.__await_cached_task(key, trace)
         if cache_value:
             # log.debug("%s %s request %s[%s] fulfilled from cache", type(self).__name__, id(self),  self.wrapped_function, key)
             return cache_value.future.result()
 
-        # further requests should wait until this task finished trying to obtain a new value
+        # further requests should wait until this task finished trying to obtain a new value (LOCK)
         self.cache[key] = self.make_cache_value(asyncio.Task.current_task())
 
+        # attempt to get a new value
         cache_value, attempts_exc_history, attempts_timed_out = await self.__attempt_await_new_task(key, args, kwargs, trace)
         if cache_value:
             log.debug("%s %s request %s[%s] fulfilled after %s failed attempts",
                       type(self).__name__, id(self), self.wrapped_function, key, len(attempts_exc_history))
             return cache_value.future.result()
 
+        # fallback to a previously valid, but expired value
         cache_value = self.__get_fallback_task(key, trace)
         if cache_value:
             log.debug("%s %s request %s[%s] fulfilled from fallback cache",
@@ -268,89 +252,17 @@ class AsyncCache(object):
         # an exception from a cached / fallback task will never be rethrown, so try to retrace exception from try_fetch_new_value
         cache_msg = " ".join(t[0] % t[1:] for t in trace_data)
         log.warning("%s %s request %s[%s] failed: %s", type(self).__name__, id(self), self.wrapped_function, key, cache_msg)
-        if attempts_exc_history:
-            # if there is anything usable in the recent exc history, use that instead of timeout / network down
-            for cv in reversed(attempts_exc_history):
-                if cv.future.done() and not cv.future.cancelled() and cv.future.exception():
-                    oserrno, errstr = guess_errno_from_exception(cv.future)
-                    raise CachedValueNotAvailableError(oserrno, errstr, cache_msg) from cv.future.exception()
-
-        if attempts_timed_out:
-            raise CachedValueNotAvailableError(errno.ETIMEDOUT, cache_msg)
-        else:
-            raise CachedValueNotAvailableError(errno.ENETDOWN, cache_msg)
+        raise self.no_cache_value_error(attempts_exc_history, attempts_timed_out, cache_msg)
 
 
-def cached_task():
+def cached_task(cache_class=AsyncCache, **kwargs):
     def wrapper(f):
-        cache = AsyncCache(wrapped_function=f, max_load_attempts=1)
+        cache = cache_class(wrapped_function=f, **kwargs)
 
-        # can't call the AsyncCache directly, need to wrap in in a function that can be modified by update_wrapper
+        # can't call the AsyncCache directly, need to wrap it in a function that can be modified by update_wrapper
         def cached(*args, **kwargs):
             return cache(*args, **kwargs)
 
         return functools.update_wrapper(cached, f)
 
     return wrapper
-
-
-@attr.s()
-class AsyncModelCache(AsyncCache):
-    def make_key(self, args, kwargs) -> KeyType:
-        keys = list(chain(args, kwargs.values()))
-        if len(keys) == 0:
-            return ""
-        else:
-            assert len(keys) == 1
-            from studip_api.model import ModelClass
-            assert isinstance(keys[0], ModelClass)
-            return keys[0].id
-
-    def update_cache(self, export_data: Dict, overwrite: bool):
-        raise NotImplementedError("cache persistance not available for %s" % type(self).__name__)
-
-    def export_cache(self) -> Dict:
-        raise NotImplementedError("cache persistance not available for %s" % type(self).__name__)
-
-
-@attr.s()
-class AsyncDownloadCache(AsyncCache):
-    def make_key(self, args, kwargs):
-        arguments = inspect.signature(self.wrapped_function).bind(*args, **kwargs)  # type: BoundArguments
-        arguments.apply_defaults()
-        return arguments.arguments["studip_file"], arguments.arguments["local_dest"]
-
-    def start_task(self, func_args, func_kwargs, old_value=None, **context):
-        from studip_api.downloader import log, Download
-
-        if old_value and old_value.is_available():
-            old_task = old_value.future
-            assert asyncio.isfuture(old_task) and old_task.done(), \
-                "Can't create a new cached download task when old task is in invalid state: %s" % old_value
-            if old_task.done() and not old_task.exception() and not old_task.cancelled():
-                assert isinstance(old_task.result(), Download), \
-                    "Expected result of old cached download task to be a Download, but it was %s" % old_value.result()
-                return asyncio.ensure_future(old_task.result().fork())
-            else:
-                log.debug("Previous download for %s failed, retrying task %s instead of forking.", key, old_value)
-
-        return super().start_task(func_args, func_kwargs)
-
-    def make_cache_value(self, task: Future, **context):
-        return CachedDownload(task)
-
-
-@attr.s(frozen=True, slots=True)
-class CachedDownload(CachedValue):
-    def is_pending(self):
-        return super().is_pending() or \
-               (super().is_valid() and not self.future.result().completed.done())
-
-    def is_valid(self):
-        if self.future is None or not self.future.done() or self.future.cancelled():
-            return False
-        if self.future.exception():
-            return is_permanent_exception(self.future.exception())
-        else:
-            download_completed = self.future.result().completed
-            return download_completed.done() and not (download_completed.cancelled() or download_completed.exception())
