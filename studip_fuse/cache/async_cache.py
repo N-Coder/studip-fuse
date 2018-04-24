@@ -143,6 +143,7 @@ class AsyncCache(object):
                                   type(self).__name__, id(self), self.wrapped_function, key, exc_info=True)
                         self.cache[key] = cache_value  # let task finish in the background
                         attempts_exc_history.append(cache_value)  # might not be done yet, but still record
+                        cache_value = None  # don't return this value
                         attempts_timed_out = True
                         break
                     else:
@@ -163,6 +164,7 @@ class AsyncCache(object):
                                   type(self).__name__, id(self), self.wrapped_function, key)
 
                     attempts_exc_history.append(cache_value)
+                    cache_value = None  # don't return this value
                     continue
 
                 else:  # the returned value / raised exception is accepted as a result
