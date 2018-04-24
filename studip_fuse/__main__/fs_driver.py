@@ -51,11 +51,17 @@ class FixedFUSE(FUSE):
 
             else:
                 try:
-                    return func(*args, **kwargs) or 0
+                    try:
+                        return func(*args, **kwargs) or 0
+                    except OSError as e:
+                        if e.errno > 0:
+                            return -e.errno
+                        else:
+                            raise
                 except Exception as e:
                     err_no, err_msg = guess_errno_from_exception(e)
-                    log.error("Uncaught exception from FUSE operation %s, returning errno %s: %s",
-                              func.__name__, err_no, err_msg, exc_info=True)
+                    log.error("Uncaught exception from FUSE operation %s, returning %s[%s]: %s",
+                              func.__name__, errno.errorcode.get(err_no, ""), err_no, err_msg, exc_info=True)
                     return -err_no
 
         except BaseException as e:
@@ -176,7 +182,7 @@ class FUSEView(object):
         elif resolved_real_file.is_folder:
             return ['.', '..'] + [path_name(rp.path) for rp in await resolved_real_file.list_contents()]
         else:
-            raise OSError(errno.ENOTDIR)
+            raise OSError(errno.ENOTDIR, path)
 
     def access(self, path, mode):
         return self._resolve(path).access(mode)
@@ -187,7 +193,7 @@ class FUSEView(object):
     def open(self, path, flags):
         resolved_real_file = self._resolve(path)
         if resolved_real_file.is_folder:
-            raise OSError(errno.EISDIR)
+            raise OSError(errno.EISDIR, path)
         else:
             download = self.schedule_async(resolved_real_file.open_file(flags)).result()
             if os.name == 'nt' and not flags & getattr(os, "O_TEXT", 16384):
