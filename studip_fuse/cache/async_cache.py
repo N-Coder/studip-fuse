@@ -234,14 +234,16 @@ class AsyncCache(object):
             return cache_value.future.result()
 
         # further requests should wait until this task finished trying to obtain a new value (LOCK)
-        self.cache[key] = self.make_cache_value(asyncio.Task.current_task())
-
+        self.cache[key] = current_task = self.make_cache_value(asyncio.Task.current_task())
         # attempt to get a new value
         cache_value, attempts_exc_history, attempts_timed_out = await self.__attempt_await_new_task(key, args, kwargs, trace)
         if cache_value:
             log.debug("%s %s request %s[%s] fulfilled after %s failed attempts",
                       type(self).__name__, id(self), self.wrapped_function, key, len(attempts_exc_history))
             return cache_value.future.result()
+        # if cache value wasn't changed by attempts, discard ref to current task, otherwise fallback value would be propagated to cache again
+        if self.cache[key] is current_task:
+            del self.cache[key]
 
         # fallback to a previously valid, but expired value
         cache_value = self.__get_fallback_task(key, trace)
