@@ -120,12 +120,19 @@ class AsyncDownloadCache(AsyncCache):
             old_task = old_value.future
             assert asyncio.isfuture(old_task) and old_task.done(), \
                 "Can't create a new cached download task when old task is in invalid state: %s" % old_value
-            if old_task.done() and not old_task.exception() and not old_task.cancelled():
+
+            if not old_value.is_fresh(self.cache_timeout):
+                log.debug("Previous download for %s expired, discarding temporary data and "
+                          "loading current data from disc / starting new download for new data.", _key)
+            elif old_task.exception() or old_task.cancelled():
+                log.debug("Previous download for %s could not be started, "
+                          "retrying whole Download instead of forking %s.", _key, old_value)
+            else:
                 assert isinstance(old_task.result(), Download), \
                     "Expected result of old cached download task to be a Download, but it was %s" % old_value.result()
+                assert not old_task.is_valid(), \
+                    "No reason to fork from valid and fresh previous Download %s" % old_task.result()
                 return asyncio.ensure_future(old_task.result().fork())
-            else:
-                log.debug("Previous download for %s failed, retrying task %s instead of forking.", _key, old_value)
 
         return super().start_task(func_args, func_kwargs)
 
