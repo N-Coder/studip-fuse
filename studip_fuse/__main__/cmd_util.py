@@ -79,7 +79,8 @@ def StoreNameValuePair(option_parser):
             ignored_values = []
             values = flatten(v.split(',') for v in values)
             for value in values:
-                if value in ["suid", "nosuid", "dev", "nodev", "ro"]:
+                if value in ["dev", "nodev", "exec", "noexec", "suid", "nosuid", "ro"]:
+                    # -o arguments set automatically from fstab that should be ignored
                     ignored_values.append(value)
                 elif value == "rw":
                     parser.error("Stud.IP FUSE only supports read-only mount")
