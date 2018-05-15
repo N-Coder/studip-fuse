@@ -3,7 +3,7 @@ import os
 from asyncio import as_completed
 from datetime import datetime
 from os import path
-from stat import S_IFDIR, S_IFREG, S_IRGRP, S_IROTH, S_IRUSR
+from stat import S_IFDIR, S_IFREG, S_IRGRP, S_IROTH, S_IRUSR, S_IXGRP, S_IXOTH, S_IXUSR
 from typing import Any, Dict, List, Optional, Set, Tuple, Type, Union
 
 import attr
@@ -148,6 +148,8 @@ class VirtualPath(object):
                  st_mode=S_IFDIR if self.is_folder else S_IFREG)
         if self.is_folder or self._file.is_accessible:
             d["st_mode"] |= S_IRUSR | S_IRGRP | S_IROTH
+        if self.is_folder:
+            d["st_mode"] |= S_IXUSR | S_IXGRP | S_IXOTH
         if hasattr(os, "getuid"):
             d["st_uid"] = os.getuid()
         if hasattr(os, "getgid"):
