@@ -11,7 +11,7 @@ import yaml
 
 from studip_fuse import __author__ as prog_author
 from studip_fuse.__main__.cmd_util import parse_args
-from studip_fuse.__main__.fs_driver import FixedFUSE
+from studip_fuse.__main__.fs_driver import FixedFUSE, log_status
 
 
 def excepthook(type, value, tb):
@@ -73,6 +73,9 @@ def configure_logging():
         if "file" in handlers and "filename" not in handlers["file"]:
             handlers["file"]["filename"] = os.path.join(dirs.user_data_dir, "studip-log.txt")
 
+        if "status" in handlers and "filename" not in handlers["status"]:
+            handlers["status"]["filename"] = os.path.join(dirs.user_data_dir, "studip-status.txt")
+
     logging.config.dictConfig(logging_config)
 
     sys.excepthook = excepthook
@@ -83,6 +86,7 @@ def configure_logging():
 
 
 def main():
+    args = None
     try:
         configure_logging()
 
@@ -115,6 +119,7 @@ def main():
         args.get_password = lambda: password  # wrap in lambda to prevent printing
 
         from fuse import FUSE, fuse_get_context
+        log_status("STARTING", args=args, level=logging.DEBUG)
         logging.debug("Starting FUSE driver to mount at %s (uid=%s, gid=%s, pid=%s, python pid=%s)", args.mount,
                       *fuse_get_context(), os.getpid())
         # This calls fork if args.foreground == False (https://bugs.python.org/issue21998)
@@ -124,6 +129,7 @@ def main():
     except:
         logging.error("main() function quit exceptionally", exc_info=True)
     finally:
+        log_status("TERMINATED", args=args, level=logging.DEBUG)
         logging.debug("Program terminated")
 
 
