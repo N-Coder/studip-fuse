@@ -17,9 +17,15 @@ handlers:
 
   file:
     class: logging.handlers.WatchedFileHandler
-    # handlers.file.filename will be inferred automatically to user_cache_dir/studip-log.txt
+    # handlers.file.filename will be inferred automatically to user_data_dir/studip-log.txt
     # filename: /tmp/studip_fuse.log
     formatter: simple
+
+  status:
+    class: logging.handlers.WatchedFileHandler
+    # handlers.file.filename will be inferred automatically to user_data_dir/studip-status.txt
+    # filename: /tmp/studip_fuse_status.log
+    formatter: console
 
   console:
     class: logging.StreamHandler
@@ -49,6 +55,10 @@ loggers:
 
   studip_api.model:
     level: INFO
+
+  studip_fuse.status:
+    handlers: [status]
+    propagate: False
 
   studip_fuse.stdout:
     handlers: [syslog, file]

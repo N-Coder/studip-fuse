@@ -26,6 +26,11 @@ log = logging.getLogger("studip_fuse.fs_driver")
 log_ops = logging.getLogger("studip_fuse.fs_driver.ops")
 
 
+def log_status(status, args=None, level=logging.INFO):
+    args = (status, *fuse_get_context(), os.getpid(), args.user if args else "?", args.mount if args else "?")
+    logging.getLogger("studip_fuse.status").log(level, " ".join(["%s"] * len(args)), *args)
+
+
 def fuse_exit():
     from fuse import _libfuse, c_void_p
 
@@ -120,6 +125,7 @@ class FUSEView(object):
                 log_ops.debug('<- %s %s', op, self.saferepr(ret))
 
     def init(self, path):
+        log_status("INITIALIZING", args=self.args)
         log.info("Mounting at %s (uid=%s, gid=%s, pid=%s, python pid=%s)", path, *fuse_get_context(),
                  os.getpid())
 
@@ -140,9 +146,11 @@ class FUSEView(object):
         self.api_thread.start()
         log.debug("HTTP API running")
 
+        log_status("READY", args=self.args)
         log.info("Mounting complete")
 
     def destroy(self, path):
+        log_status("STOPPING", args=self.args)
         log.info("Unmounting from %s (uid=%s, gid=%s, pid=%s, python pid=%s)", path, *fuse_get_context(),
                  os.getpid())
 
