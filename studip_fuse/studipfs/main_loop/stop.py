@@ -8,7 +8,7 @@ from collections import defaultdict
 
 from more_itertools import one
 
-log = logging.getLogger("studip_fuse.event_loop")
+log = logging.getLogger(__name__)
 
 
 def await_loop_thread_shutdown(loop, loop_thread):

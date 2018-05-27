@@ -11,19 +11,19 @@ from typing import Dict, List
 
 import attr
 from attr import Factory
-from fuse import FUSE, FuseOSError, fuse_get_context
+from fuse import FuseOSError, fuse_get_context
 from more_itertools import one
-
 from studip_api.downloader import Download
-from studip_fuse.__main__.main_loop import main_loop
 from studip_fuse.__main__.thread_util import ThreadSafeDefaultDict, await_loop_thread_shutdown
-from studip_fuse.cache import CachedStudIPSession, guess_errno_from_exception
-from studip_fuse.path import RealPath, VirtualPath, path_name
+from studip_fuse.cache import CachedStudIPSession
+from studip_fuse.path import RealPath, path_name
+
+from studip_fuse.studipfs.main_loop import setup_loop
 
 ENOATTR = getattr(errno, "ENOATTR", getattr(errno, "ENODATA"))
 
-log = logging.getLogger("studip_fuse.fs_driver")
-log_ops = logging.getLogger("studip_fuse.fs_driver.ops")
+log = logging.getLogger(__name__)
+log_ops = log.getChild("ops")
 
 
 def log_status(status, args=None, level=logging.INFO):
@@ -31,58 +31,6 @@ def log_status(status, args=None, level=logging.INFO):
     logging.getLogger("studip_fuse.status").log(level, " ".join(["%s"] * len(args)), *args)
 
 
-def fuse_exit():
-    from fuse import _libfuse, c_void_p
-
-    fuse_ptr = c_void_p(_libfuse.fuse_get_context().contents.fuse)
-    _libfuse.fuse_exit(fuse_ptr)
-
-    # alternative without directly invoking native code
-    # os.kill(os.getpid(), signal.SIGINT)
-
-
-class FixedFUSE(FUSE):
-    def __init__(self, operations: "FUSEView", mountpoint, **kwargs):
-        self.__critical_exception = None
-        super().__init__(operations, mountpoint, **kwargs)
-        if self.__critical_exception:
-            raise self.__critical_exception
-
-    def _wrapper(self, func, *args, **kwargs):
-        try:
-            if func.__name__ == "init":
-                # init may not fail, as its return code is just stored as private_data field of struct fuse_context
-                return func(*args, **kwargs) or 0
-
-            else:
-                try:
-                    try:
-                        return func(*args, **kwargs) or 0
-                    except OSError as e:
-                        if e.errno > 0:
-                            return -e.errno
-                        else:
-                            raise
-                except Exception as e:
-                    err_no, err_msg = guess_errno_from_exception(e)
-                    log.error("Uncaught exception from FUSE operation %s, returning %s[%s]: %s",
-                              func.__name__, errno.errorcode.get(err_no, ""), err_no, err_msg, exc_info=True)
-                    return -err_no
-
-        except BaseException as e:
-            self.__critical_exception = e
-            log.critical("Uncaught critical exception from FUSE operation %s, aborting.",
-                         func.__name__, exc_info=True)
-            # the raised exception (even SystemExit) will be caught by FUSE potentially causing SIGSEGV,
-            # so tell system to stop/interrupt FUSE
-            fuse_exit()
-            return -errno.EFAULT
-
-
-# FUSE Doc:             https://libfuse.github.io/doxygen/files.html
-# FUSE Explanation:     https://lastlog.de/misc/fuse-doc/doc/html/
-# FUSE Functions Info:  https://www.cs.hmc.edu/~geoff/classes/hmc.cs135.201001/homework/fuse/fuse_doc.html
-# Linux System Errors:  http://www-numi.fnal.gov/offline_software/srt_public_context/WebDocs/Errors/unix_system_errors.html
 @attr.s(hash=False)
 class FUSEView(object):
     args = attr.ib()
@@ -130,14 +78,14 @@ class FUSEView(object):
                  os.getpid())
 
         self.loop_future = concurrent.futures.Future()
-        self.loop_thread = Thread(target=main_loop, args=(self.args, self.http_args, self.loop_future),
+        self.loop_thread = Thread(target=setup_loop, args=(self.args, self.http_args, self.loop_future),
                                   name="aio event loop", daemon=True)
         self.loop_thread.start()
         log.debug("Event loop thread started, waiting for session initialization")
         self.loop, self.session = self.loop_future.result()
 
-        vp = VirtualPath(session=self.session, path_segments=[], known_data={}, parent=None,
-                         next_path_segments=self.args.format.split("/"))
+        vp = StudIPPath(session=self.session, path_segments=[], known_data={}, parent=None,
+                        next_path_segments=self.args.format.split("/"))
         self.root_rp = RealPath(parent=None, generating_vps={vp})
         log.debug("Session and virtual FS initialized")
 
@@ -176,7 +124,7 @@ class FUSEView(object):
     async def _aresolve(self, path: str) -> RealPath:
         resolved_real_file = await self.root_rp.resolve(path)
         if not resolved_real_file:
-            raise OSError(errno.ENOENT, path)
+            return -errno.ENOENT
         else:
             return resolved_real_file
 
@@ -186,11 +134,11 @@ class FUSEView(object):
     async def _areaddir(self, path) -> List[str]:
         resolved_real_file = await self.root_rp.resolve(path)
         if not resolved_real_file:
-            raise OSError(errno.ENOENT, path)
+            return -errno.ENOENT
         elif resolved_real_file.is_folder:
             return ['.', '..'] + [path_name(rp.path) for rp in await resolved_real_file.list_contents()]
         else:
-            raise OSError(errno.ENOTDIR, path)
+            return -errno.ENOTDIR
 
     def access(self, path, mode):
         return self._resolve(path).access(mode)
@@ -201,7 +149,7 @@ class FUSEView(object):
     def open(self, path, flags):
         resolved_real_file = self._resolve(path)
         if resolved_real_file.is_folder:
-            raise OSError(errno.EISDIR, path)
+            return -errno.EISDIR
         else:
             download = self.schedule_async(resolved_real_file.open_file(flags)).result()
             if os.name == 'nt' and not flags & getattr(os, "O_TEXT", 16384):
@@ -276,7 +224,7 @@ class FUSEView(object):
             else:
                 return "".encode()
         else:
-            raise FuseOSError(ENOATTR)
+            return -ENOATTR
 
     def listxattr(self, path):
         return ["user.studip-fuse.contents-status", "user.studip-fuse.contents-exception"]

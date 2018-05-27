@@ -2,38 +2,39 @@ import logging
 import os
 from asyncio import as_completed
 from datetime import datetime
+from enum import Enum
 from os import path
-from stat import S_IFDIR, S_IFREG, S_IRGRP, S_IROTH, S_IRUSR, S_IXGRP, S_IXOTH, S_IXUSR
-from typing import Any, Dict, List, Optional, Set, Tuple, Type, Union
+from stat import S_IFDIR, S_IFREG, S_IRGRP, S_IROTH, S_IRUSR
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 import attr
 from cached_property import cached_property
-from frozendict import frozendict
+from studip_fuse.studipfs.encoding import Charset, EscapeMode, escape_file_name
 
-from studip_api.downloader import Download
-from studip_api.model import Course, File, Semester
-from studip_fuse.cache import cached_task
-from studip_fuse.path.path_util import Charset, EscapeMode, escape_file_name, get_format_segment_requires, \
-    normalize_path, path_head, path_tail
+from studip_fuse.avfs import FormatToken, VirtualPath, get_format_str_fields, path_head, path_tail
 
-log = logging.getLogger("studip_fuse.virtual_path")
+log = logging.getLogger(__name__)
+
+
+class DataField(Enum):
+    File = 1
+    Course = 2
+    Semester = 3
+
+
+File = DataField.File
+Course = DataField.Course
+Semester = DataField.Semester
 
 
 @attr.s(frozen=True, str=False, repr=False, hash=False)
-class VirtualPath(object):
-    session = attr.ib()  # type: 'StudIPSession'
-    path_segments = attr.ib(convert=tuple)  # type: Tuple[str]
-    known_data = attr.ib(convert=frozendict)  # type: Union[Dict[Type, Any], frozendict]
-    parent = attr.ib()  # type: Optional['VirtualPath']
-    next_path_segments = attr.ib(convert=tuple)  # type: Tuple[str]
+class StudIPPath(VirtualPath):
+    session = attr.ib()  # type: Session
 
-    # __init__  ########################################################################################################
-
-    @known_data.validator
-    def validate(self, *_):
-        inv_keys = set(self.known_data.keys()).difference([File, Course, Semester])
+    def validate(self):
+        inv_keys = set(self.known_data.keys()).difference(DataField)
         if inv_keys:
-            raise ValueError("invalid keys for known_data: %s" % inv_keys)
+            raise ValueError("Invalid keys for known_data: %s" % inv_keys)
 
         if not self.is_folder:
             assert self._file, \
@@ -41,31 +42,10 @@ class VirtualPath(object):
                 "not a folder), but doesn't uniquely describe a single file. " \
                 "Does your path format specification make sense?" % self
 
-        # FIXME known_data of child may differ from parent, breaking some path logic. reenable validation (see issue #2)
-
-    # public properties  ###############################################################################################
-
-    @cached_property
-    def partial_path(self):
-        path_segments = self.path_segments
-        if self._loop_over_path and self._file:
-            # preview the file path we're generating in the loop
-            path_segments = path_segments + (path_head(self.next_path_segments),)
-        partial = "/".join(path_segments).format(**self._known_tokens)
-        partial = normalize_path(partial)
-        return partial
-
-    @cached_property
-    def is_folder(self) -> bool:
-        return bool(self.next_path_segments)
-
-    @cached_property
-    def is_root(self) -> bool:
-        return not self.parent
+        super().validate()
 
     # FS-API  ##########################################################################################################
 
-    @cached_task()
     async def list_contents(self) -> List['VirtualPath']:
         assert self.is_folder, "list_contents called on non-folder %s" % self
 
@@ -140,16 +120,11 @@ class VirtualPath(object):
         return [self._sub_path(new_known_data=d, increment_path_segments=not self._loop_over_path)
                 for d in data]
 
-    def access(self, mode):
-        pass
-
     def getattr(self):
         d = dict(st_ino=hash(self.partial_path), st_nlink=1,
                  st_mode=S_IFDIR if self.is_folder else S_IFREG)
         if self.is_folder or self._file.is_accessible:
             d["st_mode"] |= S_IRUSR | S_IRGRP | S_IROTH
-        if self.is_folder:
-            d["st_mode"] |= S_IXUSR | S_IXGRP | S_IXOTH
         if hasattr(os, "getuid"):
             d["st_uid"] = os.getuid()
         if hasattr(os, "getgid"):
@@ -169,26 +144,31 @@ class VirtualPath(object):
         assert not self.is_folder, "open_file called on folder %s" % self
         return await self.session.download_file_contents(self._file)
 
-    # private properties ###############################################################################################
-
-    def __escape_file(self, str):
-        return escape_file_name(str, Charset.Ascii, EscapeMode.Similar)
-
-    def __escape_path(self, folders):
-        return path.join(*map(self.__escape_file, folders)) if folders else ""
+    # public properties  ###############################################################################################
 
     @cached_property
-    def mod_times(self) -> Tuple[Optional[datetime], Optional[datetime]]:
-        if self._file:
-            return self._file.created, self._file.changed
-        if self._course:
-            return (self._course.semester.start_date,) * 2
-        if self._semester:
-            return (self._semester.start_date,) * 2
-        return None, None
+    def content_options(self) -> Set[DataField]:
+        format_segment = path_head(self.next_path_segments)
+        requirements = set()
+        for field_name in get_format_str_fields(format_segment):
+            if field_name in ["semester", "semester-lexical", "semester-lexical-short"]:
+                requirements.add(Semester)
+            elif field_name in ["course", "course-abbrev", "course-id", "type", "type-abbrev"]:
+                requirements.add(Course)
+            elif field_name in ["path", "short-path", "id", "name", "description", "author"]:
+                requirements.add(File)
+            elif field_name == "time" and not requirements:  # any info can provide a time
+                requirements.add(Semester)
+            else:
+                raise ValueError("Unknown format field name '%s' in format string '%s'" % (field_name, format_segment))
+        return requirements
 
     @cached_property
-    def _known_tokens(self):
+    def segment_needs_expand_loop(self) -> bool:
+        return self.is_folder and any(t in path_head(self.next_path_segments) for t in ["{path}", "{short-path}"])
+
+    @cached_property
+    def known_tokens(self) -> Dict[FormatToken, Any]:
         tokens = {  # TODO time may differ between file and parent folder, which will break path logic (see issue #2)
             "created": self.mod_times[0],
             "changed": self.mod_times[1],
@@ -244,6 +224,14 @@ class VirtualPath(object):
             })
         return tokens
 
+    # utils  ###########################################################################################################
+
+    def __escape_file(self, str):
+        return escape_file_name(str, Charset.Ascii, EscapeMode.Similar)
+
+    def __escape_path(self, folders):
+        return path.join(*map(self.__escape_file, folders)) if folders else ""
+
     @cached_property
     def _file(self) -> File:
         return self.known_data.get(File, None)
@@ -257,61 +245,11 @@ class VirtualPath(object):
         return self.known_data.get(Semester, None)
 
     @cached_property
-    def _loop_over_path(self):
-        return self.is_folder and any(t in path_head(self.next_path_segments) for t in ["{path}", "{short-path}"])
-
-    @cached_property
-    def _content_options(self) -> Set[Type]:
-        if self.is_folder:
-            return get_format_segment_requires(path_head(self.next_path_segments))
-        else:
-            return set()
-
-    def _sub_path(self, new_known_data=None, increment_path_segments=True, **kwargs):
-        assert self.is_folder, "_sub_path called on non-folder %s" % self
-        args = dict(session=self.session, parent=self, known_data=self.known_data)
-        if increment_path_segments:
-            args.update(path_segments=self.path_segments + (path_head(self.next_path_segments),),
-                        next_path_segments=path_tail(self.next_path_segments))
-        else:
-            args.update(path_segments=self.path_segments,
-                        next_path_segments=self.next_path_segments)
-        if new_known_data:
-            args["known_data"] = dict(args["known_data"])
-            args["known_data"].update(new_known_data)
-        args.update(kwargs)
-        for type, value in args["known_data"].items():
-            assert isinstance(value, type), "known_data item '%s' must be of type %s" % (value, type)
-        return VirtualPath(**args)
-
-    # utils  ###########################################################################################################
-
-    def __hash__(self):
-        return hash((self.path_segments, self.known_data, self.parent, self.next_path_segments))
-
-    def __str__(self):
-        path_segments = [seg.format(**self._known_tokens) for seg in self.path_segments]
-
-        if self._loop_over_path and self._file:
-            # preview the file path we're generating in the loop
-            preview_file_path = path_head(self.next_path_segments).format(**self._known_tokens)
-            if preview_file_path:
-                path_segments.append("(" + preview_file_path + ")")
-
-        path_segments += self.next_path_segments
-
-        options = "[%s]->[%s]" % (
-            ",".join(c.__name__ for c in self.known_data.keys()),
-            ",".join(c.__name__ for c in self._content_options))
-        return "[%s](%s)" % (
-            "/".join(filter(bool, path_segments)),
-            ",".join(filter(bool, [
-                "root" if self.is_root else None,
-                "folder" if self.is_folder else "file",
-                "loop_path" if self._loop_over_path else None,
-                options
-            ]))
-        )
-
-    def __repr__(self):
-        return "VirtualPath(%s)" % str(self)
+    def mod_times(self) -> Tuple[Optional[datetime], Optional[datetime]]:
+        if self._file:
+            return self._file.created, self._file.changed
+        if self._course:
+            return (self._course.semester.start_date,) * 2
+        if self._semester:
+            return (self._semester.start_date,) * 2
+        return None, None
