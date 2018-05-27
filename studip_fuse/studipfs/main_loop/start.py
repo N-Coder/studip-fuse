@@ -6,10 +6,10 @@ from contextlib import ExitStack, contextmanager
 
 from studip_fuse.cache import CachedStudIPSession
 
-log = logging.getLogger("studip_fuse.event_loop")
+log = logging.getLogger(__name__)
 
 
-def main_loop(args, http_args, future: concurrent.futures.Future):
+def setup_loop(args, http_args, future: concurrent.futures.Future):
     with ExitStack() as stack:
         future = stack.enter_context(future_context(future))
         future.check_cancelled()
