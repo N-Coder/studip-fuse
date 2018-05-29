@@ -7,7 +7,7 @@ import warnings
 from typing import Dict, List, Mapping, Tuple, Union
 
 import attr
-from async_generator import async_generator, yield_
+from async_generator import async_generator, yield_, yield_from_
 from requests import Session as HTTPSession
 from requests.auth import HTTPBasicAuth
 from studip_api.downloader import Download
@@ -39,21 +39,27 @@ class AsyncHTTPSession(HTTPSession):
 
 
 @async_generator
-async def studip_iter(get_next, start, max_total=None) -> AsyncGenerator[Dict]:
+async def studip_iter(get_next, start, max_total=None):  # -> AsyncGenerator[Dict, None]
     endpoint = start
     last_seen = None
     limit = max_total
 
     while last_seen is None or last_seen < limit:
-        json = get_next(endpoint)
-        last_seen = int(json["pagination"]["last_seen"])
+        json = await get_next(endpoint)
+        last_seen = int(json["pagination"]["offset"]) + len(json["collection"])
         total = int(json["pagination"]["total"])
-        limit = min(total, limit)
+        limit = min(total, limit or total)
 
-        for value in json["collection"]:
+        coll = json["collection"]
+        if isinstance(coll, Mapping):
+            coll = coll.values()
+        for value in coll:
             await yield_(value)
 
-        endpoint = json["pagination"]["next"]
+        try:
+            endpoint = json["pagination"]["links"]["next"]
+        except KeyError:
+            break
 
 
 @attr.s(hash=False, str=False, repr=False)
@@ -100,18 +106,26 @@ class StudIPSession(object):
     async def get_user(self):
         return await self._studip_json_req("user")
 
-    async def get_semesters(self) -> AsyncGenerator[Dict]:
-        return await studip_iter(self._studip_json_req, "semesters")
+    @async_generator
+    async def get_semesters(self):  # -> AsyncGenerator[Dict, None]:
+        await yield_from_(studip_iter(self._studip_json_req, "semesters"))
 
-    async def get_courses(self, semester: Semester) -> AsyncGenerator[Dict]:
-        return await studip_iter(self._studip_json_req, "user/%s/courses?semester=%s" %
-                                 (semester["id"], (await self.get_user())["id"]))
+    @async_generator
+    async def get_courses(self, semester: Semester):  # -> AsyncGenerator[Dict, None]:
+        semesters = {semester["id"]: semester async for semester in self.get_semesters()}
+        user = await self.get_user()
+        async for course in studip_iter(
+                self._studip_json_req, "user/%s/courses?semester=%s" %
+                                       (user["user_id"], semester["id"])):
+            await yield_(course)
 
-    async def get_course_root_file(self, course: Course) -> Dict:
-        return await self._studip_json_req("/course/%s/top_folder" % course["id"])
+    async def get_course_root_file(self, course: Course) -> Tuple[Dict, List, List]:
+        folder = await self._studip_json_req("/course/%s/top_folder" % course["course_id"])
+        return folder, folder.get("subfolders", []), folder.get("file_refs", [])
 
-    async def get_folder_files(self, folder: File) -> AsyncGenerator[Dict]:
-        return await studip_iter(self._studip_json_req("/folder/%s" % folder["id"]))
+    async def get_folder_details(self, folder: File) -> Tuple[Dict, List, List]:
+        folder = await self._studip_json_req("/folder/%s" % folder["id"])
+        return folder, folder.get("subfolders", []), folder.get("file_refs", [])
 
     async def download_file_contents(self, studip_file: File, local_dest: str = None,
                                      chunk_size: int = 1024 * 256) -> Download:
