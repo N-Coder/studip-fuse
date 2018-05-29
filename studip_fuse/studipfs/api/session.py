@@ -1,10 +1,10 @@
 import asyncio
+import functools
 import logging
 import os
 import time
 import warnings
-from concurrent.futures import Executor
-from typing import AsyncGenerator, Dict, List, Union
+from typing import Dict, List, Mapping, Tuple, Union
 
 import attr
 from async_generator import async_generator, yield_
@@ -14,6 +14,28 @@ from studip_api.downloader import Download
 from studip_api.model import Course, File, Semester
 
 log = logging.getLogger(__name__)
+
+
+# TODO move, add drop-in caching
+class AsyncHTTPSession(HTTPSession):
+    def __init__(self, loop=None, executor=None, *args, **kwargs):
+        self.loop = loop or asyncio.get_event_loop()
+        self.executor = executor
+        super(AsyncHTTPSession, self).__init__(*args, **kwargs)
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *args):
+        await self.close()
+
+    def close(self):
+        return self.loop.run_in_executor(self.executor, super(AsyncHTTPSession, self).close)
+
+    async def request(self, *args, **kwargs):
+        resp = await self.loop.run_in_executor(self.executor, functools.partial(super(AsyncHTTPSession, self).request, *args, **kwargs))
+        resp.raise_for_status()
+        return resp
 
 
 @async_generator
@@ -37,35 +59,29 @@ async def studip_iter(get_next, start, max_total=None) -> AsyncGenerator[Dict]:
 @attr.s(hash=False, str=False, repr=False)
 class StudIPSession(object):
     studip_base = attr.ib()  # type: str
-    loop = attr.ib(default=None)  # type: asyncio.AbstractEventLoop
-    executor = attr.ib(default=None)  # type: Executor
-    http = attr.ib(default=None)  # type: HTTPSession
+    http = attr.ib()  # type: HTTPSession
 
     async def __aenter__(self):
-        if not self.loop:
-            self.loop = asyncio.get_event_loop()
-        if not self.http:
-            self.http = HTTPSession()
         return self
 
     async def __aexit__(self, exc_type, exc_val, exc_tb):
         await self.close()
 
     async def close(self):
-        await self.loop.run_in_executor(self.executor, self.http.close())
+        await self.http.close()
 
     def _studip_url(self, url):
         return self.studip_base + url
 
     async def _studip_json_req(self, endpoint):
-        return await self.loop.run_in_executor(
-            self.executor,
-            lambda: self.http.get(self._studip_url(endpoint)).json())
+        resp = await self.http.get(self._studip_url(endpoint))
+        return resp.json()
 
     async def do_login(self, username, password):
         # TODO add login methods
         self.http.auth = HTTPBasicAuth(username, password)
-        assert (await self._studip_json_req("user"))["name"] == "username"
+        user_data = await self._studip_json_req("user")
+        assert user_data["username"] == username
 
         discovery = await self._studip_json_req("discovery")
         for path in [
