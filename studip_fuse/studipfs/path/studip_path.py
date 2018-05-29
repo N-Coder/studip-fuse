@@ -1,25 +1,77 @@
+import asyncio
+import itertools
 import logging
 import os
-from asyncio import as_completed
+from asyncio import Queue
 from datetime import datetime
-from enum import Enum
+from enum import IntEnum
 from os import path
 from stat import S_IFDIR, S_IFREG, S_IRGRP, S_IROTH, S_IRUSR
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, Optional, Set, Tuple
 
 import attr
+from async_generator import async_generator, yield_
 from cached_property import cached_property
-from studip_fuse.studipfs.encoding import Charset, EscapeMode, escape_file_name
 
-from studip_fuse.avfs import FormatToken, VirtualPath, get_format_str_fields, path_head, path_tail
+from studip_fuse.avfs.path_util import path_head, path_tail
+from studip_fuse.avfs.virtual_path import FormatToken, VirtualPath, get_format_str_fields
+from studip_fuse.studipfs.api.downloader import Download
+from studip_fuse.studipfs.api.session import StudIPSession
+from studip_fuse.studipfs.path.encoding import Charset, EscapeMode, escape_file_name
 
 log = logging.getLogger(__name__)
 
 
-class DataField(Enum):
-    File = 1
+# TODO move
+class Pipeline(object):
+    done_obj = object()
+
+    def __init__(self):
+        self.queues = [Queue()]
+        self.tasks = []
+
+    def put(self, item):
+        self.queues[0].put_nowait(item)
+
+    @async_generator
+    async def drain(self):
+        self.queues[0].put_nowait(self.done_obj)
+        await asyncio.gather(*self.tasks)
+
+        queue = self.queues[-1]
+        while True:
+            item = await queue.get()
+            try:
+                if item is self.done_obj:
+                    break
+                else:
+                    await yield_(item)
+            finally:
+                queue.task_done()
+
+    async def __processor(self, in_queue, out_queue, func):
+        while True:
+            item = await in_queue.get()
+            try:
+                if item is self.done_obj:
+                    out_queue.put_nowait(self.done_obj)
+                    break
+                else:
+                    await func(item, out_queue)
+            finally:
+                in_queue.task_done()
+
+    def add_processor(self, func):
+        in_queue = self.queues[-1]
+        out_queue = Queue()
+        self.queues.append(out_queue)
+        self.tasks.append(self.__processor(in_queue=in_queue, out_queue=out_queue, func=func))
+
+
+class DataField(IntEnum):
+    Semester = 1
     Course = 2
-    Semester = 3
+    File = 3
 
 
 File = DataField.File
@@ -29,7 +81,7 @@ Semester = DataField.Semester
 
 @attr.s(frozen=True, str=False, repr=False, hash=False)
 class StudIPPath(VirtualPath):
-    session = attr.ib()  # type: Session
+    session = attr.ib()  # type: StudIPSession
 
     def validate(self):
         inv_keys = set(self.known_data.keys()).difference(DataField)
@@ -46,79 +98,48 @@ class StudIPPath(VirtualPath):
 
     # FS-API  ##########################################################################################################
 
-    async def list_contents(self) -> List['VirtualPath']:
+    @async_generator
+    async def list_contents(self):
         assert self.is_folder, "list_contents called on non-folder %s" % self
 
-        if File in self._content_options:
-            return await self._list_contents_file_options()
+        has = max(self.known_data.keys(), default=0)
+        wants = max(self.content_options, default=0)
 
-        elif Course in self._content_options:
-            if self._course:  # everything is already known, no options on this level
-                return [self._sub_path()]
-            elif self._semester:
-                return [self._sub_path(new_known_data={Course: course})
-                        for course in await self.session.get_courses(self._semester)]
-            else:
-                list = []
-                semesters = await self.session.get_semesters()
-                # start all the dependant tasks now and await them later
-                courses_futures = {semester: self.session.get_courses(semester) for semester in semesters}
-                for semester, courses_future in courses_futures.items():
-                    for course in await courses_future:
-                        list.append(self._sub_path(new_known_data={Semester: semester, Course: course}))
-                return list
-
-        elif Semester in self._content_options:
-            if self._semester:  # everything is already known, no options on this level
-                return [self._sub_path()]
-            else:
-                return [self._sub_path(new_known_data={Semester: semester})
-                        for semester in await self.session.get_semesters()]
-
+        if has == wants == DataField.File and self.segment_needs_expand_loop and self._file.is_folder:
+            # loop over contents of one folder
+            folder, subfolders, files = self.session.get_folder_details(self._file)
+            for data in itertools.chain(subfolders, files):
+                await yield_(self._mk_sub_path(new_known_data=data, increment_path_segments=False))
+        elif wants <= has:
+            # we already know all we want to know
+            await yield_(self._mk_sub_path())
         else:
-            assert not self._content_options, "unknown content options %s for virtual path %s" % \
-                                              (self._content_options, self)
-            return [self._sub_path()]
+            needs = [field for field in DataField if has < field <= wants]
+            pipeline = Pipeline()
+            if Semester in needs:
+                pipeline.add_processor(self.__list_semesters)
+            if Course in needs:
+                pipeline.add_processor(self.__list_courses)
+            if File in needs:
+                pipeline.add_processor(self.__list_root_file)
+            pipeline.put(self.known_data)
+            async for data in pipeline.drain():
+                await yield_(self._mk_sub_path(new_known_data=data))
 
-    async def _list_contents_file_options(self) -> List['VirtualPath']:
-        assert self.is_folder, "_list_contents_file_options called on non-folder %s" % self
+    async def __list_semesters(self, item, out_queue):
+        async for semester in self.session.get_semesters():
+            out_queue.put_nowait({Semester: semester})
 
-        if self._file:
-            if self._loop_over_path and self._file.is_folder:  # loop over contents of one folder
-                data = [{File: file} for file in await self.session.get_folder_files(self._file)]
-            else:  # everything is already known, no options on this level
-                return [self._sub_path()]
+    async def __list_courses(self, item, out_queue):
+        semester = item[Semester]
+        async for course in self.session.get_courses(semester):
+            out_queue.put_nowait({Semester: semester, Course: course})
 
-        else:  # all folders still possible
-            if self._course:
-                data = [{File: await self.session.get_course_root_file(self._course)}]
-
-            elif self._semester:
-                data = []
-                courses = await self.session.get_courses(self._semester)
-                # start all the dependant tasks now and await them later
-                file_futures = {course: self.session.get_course_root_file(course) for course in courses}
-                for course, file_future in file_futures.items():
-                    data.append({Course: course, File: await file_future})
-
-            else:
-                data = []
-                # start all the dependant tasks now and await them later
-                semesters = await self.session.get_semesters()
-                courses_futures = {semester: self.session.get_courses(semester) for semester in semesters}
-                file_futures = {}
-                for courses_future in as_completed(courses_futures.values()):
-                    for course in await courses_future:
-                        if course not in file_futures:
-                            file_futures[course] = self.session.get_course_root_file(course)
-
-                # all requests were started, now await them in order
-                for semester, courses_future in courses_futures.values():
-                    for course in await courses_future:
-                        data.append({Semester: semester, Course: course, File: await file_futures[course]})
-
-        return [self._sub_path(new_known_data=d, increment_path_segments=not self._loop_over_path)
-                for d in data]
+    async def __list_root_file(self, item, out_queue):
+        semester = item[Semester]
+        course = item[Course]
+        folder, subfolders, files = await self.session.get_course_root_file(course)
+        out_queue.put_nowait({Semester: semester, Course: course, File: folder})
 
     def getattr(self):
         d = dict(st_ino=hash(self.partial_path), st_nlink=1,
