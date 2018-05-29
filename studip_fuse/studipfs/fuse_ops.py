@@ -13,12 +13,12 @@ import attr
 from attr import Factory
 from fuse import FuseOSError, fuse_get_context
 from more_itertools import one
-from studip_api.downloader import Download
-from studip_fuse.__main__.thread_util import ThreadSafeDefaultDict, await_loop_thread_shutdown
-from studip_fuse.cache import CachedStudIPSession
-from studip_fuse.path import RealPath, path_name
 
-from studip_fuse.studipfs.main_loop import setup_loop
+from studip_fuse.avfs.path_util import path_name
+from studip_fuse.avfs.real_path import RealPath
+from studip_fuse.studipfs.main_loop.start import setup_loop
+from studip_fuse.studipfs.main_loop.stop import ThreadSafeDefaultDict, await_loop_thread_shutdown
+from studip_fuse.studipfs.path.studip_path import StudIPPath
 
 ENOATTR = getattr(errno, "ENOATTR", getattr(errno, "ENODATA"))
 
@@ -89,10 +89,10 @@ class FUSEView(object):
         self.root_rp = RealPath(parent=None, generating_vps={vp})
         log.debug("Session and virtual FS initialized")
 
-        from studip_fuse.__main__.http_api import run
-        self.api_thread = Thread(target=run, args=(self,), name="HTTP server thread", daemon=True)
-        self.api_thread.start()
-        log.debug("HTTP API running")
+        # from studip_fuse.__main__.http_api import run
+        # self.api_thread = Thread(target=run, args=(self,), name="HTTP server thread", daemon=True)
+        # self.api_thread.start()
+        # log.debug("HTTP API running")
 
         log_status("READY", args=self.args)
         log.info("Mounting complete")
@@ -141,10 +141,11 @@ class FUSEView(object):
             return -errno.ENOTDIR
 
     def access(self, path, mode):
+        # FIXME all methods are async now
         return self._resolve(path).access(mode)
 
     def getattr(self, path, fh=None):
-        return self._resolve(path).getattr()
+        return self.schedule_async(self._resolve(path).getattr()).result()
 
     def open(self, path, flags):
         resolved_real_file = self._resolve(path)

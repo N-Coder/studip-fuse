@@ -4,7 +4,7 @@ import logging
 from concurrent.futures import CancelledError
 from contextlib import ExitStack, contextmanager
 
-from studip_fuse.cache import CachedStudIPSession
+from studip_fuse.studipfs.api.session import AsyncHTTPSession, StudIPSession
 
 log = logging.getLogger(__name__)
 
@@ -77,13 +77,13 @@ def session_context(args, http_args, loop, future: concurrent.futures.Future):
     session = CachedStudIPSession(
         loop=loop, studip_base=args.studip, sso_base=args.sso, cache_dir=args.cache, http_args=http_args)
     try:
-        coro = session.do_login(user_name=args.user, password=args.get_password())
+        coro = session.do_login(username=args.user, password=args.get_password())
         task = asyncio.ensure_future(coro, loop=loop)
         future.add_done_callback(lambda f: task.cancel() if f.cancelled() else None)
 
         future.check_cancelled()
         loop.run_until_complete(task)
-        loop.run_until_complete(session.load_model(update=True))
+        # loop.run_until_complete(session.load_model(update=True))
 
         yield session
     finally:

@@ -7,8 +7,9 @@ from typing import Any, Dict, List, NewType, Optional, Set, Tuple, Type, Union
 import attr
 from cached_property import cached_property
 from frozendict import frozendict
-from studip_fuse.path.path_util import normalize_path, path_head, path_tail
 from tabulate import tabulate
+
+from studip_fuse.avfs.path_util import normalize_path, path_head, path_tail
 
 log = logging.getLogger(__name__)
 FORMATTER = Formatter()
@@ -45,7 +46,7 @@ class VirtualPath(object):
                 "Known data of child file %s doesn't include all data of its parent %s. " \
                 "Does your path format specification make sense? " \
                 "Offending keys are:\n%s" % (self, self.parent, tabulate(
-                    ((key, self.parent.known_tokens.get(key, "unset"), self.nown_tokens.get(key, "unset"))
+                    ((key, self.parent.known_tokens.get(key, "unset"), self.known_tokens.get(key, "unset"))
                      for key in set(chain(self.known_tokens.keys(), self.parent.known_tokens.keys()))),
                     headers=["key", "parent value", "child value"], missingval="None"
                 ))
@@ -102,11 +103,11 @@ class VirtualPath(object):
 
     # FS-API  ##########################################################################################################
 
-    def access(self, mode):
+    async def access(self, mode):
         pass
 
     @abstractmethod
-    def getattr(self) -> Dict[str, int]:
+    async def getattr(self) -> Dict[str, int]:
         pass
 
     @abstractmethod
@@ -119,7 +120,7 @@ class VirtualPath(object):
 
     # utils  ###########################################################################################################
 
-    def __mk_sub_path(self, new_known_data: Dict[DataField, Any] = None, increment_path_segments=True, **kwargs):
+    def _mk_sub_path(self, new_known_data: Dict[DataField, Any] = None, increment_path_segments=True, **kwargs):
         assert self.is_folder, "__mk_sub_path called on non-folder %s" % self
         args = attr.asdict(self, recurse=False)
         args["parent"] = self
@@ -133,7 +134,7 @@ class VirtualPath(object):
         if new_known_data:
             args["known_data"].update(new_known_data)
         args.update(kwargs)
-        return VirtualPath(**args)
+        return self.__class__(**args)
 
     def __str__(self):
         path_segments = [seg.format(**self.known_tokens) for seg in self.path_segments]
@@ -147,8 +148,8 @@ class VirtualPath(object):
         path_segments += self.next_path_segments
 
         options = "[%s]->[%s]" % (
-            ",".join(c.__name__ for c in self.known_data.keys()),
-            ",".join(c.__name__ for c in self.content_options))
+            ",".join(str(v) for v in self.known_data.keys()),
+            ",".join(str(v) for v in self.content_options))
         return "[%s](%s)" % (
             "/".join(filter(bool, path_segments)),
             ",".join(filter(bool, [
