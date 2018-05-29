@@ -77,6 +77,15 @@ class StudIPSession(object):
         await self.http.close()
 
     def _studip_url(self, url):
+        while True:
+            if url.startswith('/'):
+                url = url[1:]
+            elif url.startswith('studip'):
+                url = url[6:]
+            elif url.startswith('api.php'):
+                url = url[7:]
+            else:
+                break
         return self.studip_base + url
 
     async def _studip_json_req(self, endpoint):
@@ -94,10 +103,12 @@ class StudIPSession(object):
             "/user",
             "/semesters",
             "/user/:user_id/courses",
-            "/course/:course_id",
+            # "/course/:course_id",
+            # "/course/:course_id/files",
             "/course/:course_id/top_folder",
             "/folder/:folder_id",
-            "/file/:file_ref_id",
+            # "/file/:file_ref_id",
+            # "/file/:file_id/content",
             "/file/:file_ref_id/download"
         ]:
             assert path in discovery
