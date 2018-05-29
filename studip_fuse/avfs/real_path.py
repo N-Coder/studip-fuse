@@ -7,8 +7,9 @@ from typing import Dict, List, Optional, Set
 import attr
 from cached_property import cached_property
 from more_itertools import one, unique_everseen
-from studip_fuse.path.path_util import normalize_path, path_head, path_name, path_tail
-from studip_fuse.path.virtual_path import VirtualPath
+
+from studip_fuse.avfs.path_util import normalize_path, path_head, path_name, path_tail
+from studip_fuse.avfs.virtual_path import VirtualPath
 
 log = logging.getLogger(__name__)
 
@@ -91,7 +92,7 @@ class RealPath(object):
                                    (self.generating_vps, self, contents)
 
         async def flatten(no_progress_vp):
-            for sub_vp in await no_progress_vp.list_contents():
+            async for sub_vp in no_progress_vp.list_contents():
                 assert sub_vp != no_progress_vp, "no_progress_vp %s returned self amongst its contents!" % no_progress_vp
                 contents[sub_vp.partial_path].add(sub_vp)
 
@@ -105,4 +106,4 @@ class RealPath(object):
                 flatten(no_progress_vp) for no_progress_vp in contents.pop(self.path)
             ))
 
-        return [RealPath(self, vps) for vps in contents.values()]
+        return [self.__class__(self, vps) for vps in contents.values()]

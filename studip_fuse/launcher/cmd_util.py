@@ -21,7 +21,7 @@ def parse_args():
     studip_opts.add_argument("--format", help="format specifier for virtual paths",
                              default="{semester-lexical-short}/{course}/{type}/{short-path}/{name}")
     studip_opts.add_argument("--cache", help="path to cache directory", default=dirs.user_cache_dir)
-    studip_opts.add_argument("--studip", help="Stud.IP base URL", default="https://studip.uni-passau.de")
+    studip_opts.add_argument("--studip", help="Stud.IP base URL", default="https://studip.uni-passau.de/studip/api.php/")
     studip_opts.add_argument("--sso", help="SSO base URL", default="https://sso.uni-passau.de")
 
     fuse_opts = opts_parser.add_argument_group("FUSE Options")

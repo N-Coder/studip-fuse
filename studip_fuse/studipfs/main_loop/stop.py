@@ -74,6 +74,7 @@ def dump_thread_stack(loop_thread):
         log.debug("Thread stack trace:\n %s", format_stack(sys._current_frames()[loop_thread.ident]))
 
 
+# TODO move
 class ThreadSafeDefaultDict(defaultdict):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)

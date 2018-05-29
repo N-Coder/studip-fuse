@@ -9,8 +9,9 @@ if __name__ == "__main__":
     os.chdir(os.path.dirname(os.path.realpath(__file__)))
 
     with open("studip_fuse/__init__.py", "r") as file:
-        version = re.search('^__version__\s*=\s*"(.*)"', file.read(), re.M).group(1)
-        author = re.search('^__author__\s*=\s*"(.*)"', file.read(), re.M).group(1)
+        contents = file.read()
+        version = re.search('^__version__\s*=\s*"(.*)"', contents, re.M).group(1)
+        author = re.search('^__author__\s*=\s*"(.*)"', contents, re.M).group(1)
 
     with open("README.md", "rb") as f:
         long_descr = f.read().decode("utf-8")
@@ -22,7 +23,7 @@ if __name__ == "__main__":
             'studip_fuse': ['launcher/logging.yaml'],
         },
         install_requires=[
-            "fusepy",
+            "fusepy",  # FIXME newest version
 
             # Launcher Requirements
             "argparse",
@@ -50,7 +51,7 @@ if __name__ == "__main__":
         ],
         entry_points={
             "console_scripts": [
-                "studip-fuse = studip_fuse.launcher:main",
+                "studip-fuse = studip_fuse.launcher.main:main",
                 "studip-fuse-install-nautilus-plugin = studip_fuse.ext.nautilus_plugin:main",
             ]
         },
