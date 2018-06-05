@@ -1,10 +1,20 @@
-from posixpath import normpath
+import posixpath
 
-__all__ = ["normalize_path", "path_head", "path_tail", "path_parent", "path_name"]
+__all__ = ["normalize_path", "path_head", "path_tail", "path_parent", "path_name", "join_path", "split_path", "commonpath"]
+
+commonpath = posixpath.commonpath
+split_path = posixpath.split
+
+
+def join_path(*p):
+    if not p:
+        return ""
+    else:
+        return posixpath.join(*p)
 
 
 def normalize_path(p):
-    p = normpath(p)
+    p = posixpath.normpath(p)
     while p.startswith("/"):
         p = p[1:]
     while p.endswith("/"):
