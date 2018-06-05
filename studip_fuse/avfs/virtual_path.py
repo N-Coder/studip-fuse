@@ -1,16 +1,14 @@
 import logging
 from abc import abstractmethod
-from itertools import chain
 from string import Formatter
 from typing import Any, Dict, List, NewType, Optional, Set, Tuple, Type, Union
 
 import attr
 from cached_property import cached_property
-from frozendict import frozendict
 from pyrsistent import freeze
 from tabulate import tabulate
 
-from studip_fuse.avfs.path_util import normalize_path, path_head, path_tail
+from studip_fuse.avfs.path_util import commonpath, join_path, normalize_path, path_head, path_tail
 
 log = logging.getLogger(__name__)
 FORMATTER = Formatter()
@@ -40,33 +38,54 @@ class VirtualPath(object):
 
     def validate(self):
         if self.parent:
-            assert self.partial_path.startswith(self.parent.partial_path), \
+            assert commonpath([self.partial_path, self.parent.partial_path]) == self.parent.partial_path, \
                 "Path of child file %s doesn't start with the path of its parent %s. " \
                 "Does your path format specification make sense?" % (self, self.parent)
-            assert set(self.known_tokens.items()).issuperset(self.parent.known_tokens.items()), \
-                "Known data of child file %s doesn't include all data of its parent %s. " \
-                "Does your path format specification make sense? " \
-                "Offending keys are:\n%s" % (self, self.parent, tabulate(
-                    ((key, self.parent.known_tokens.get(key, "unset"), self.known_tokens.get(key, "unset"))
-                     for key in set(chain(self.known_tokens.keys(), self.parent.known_tokens.keys()))),
-                    headers=["key", "parent value", "child value"], missingval="None"
-                ))
+            changed_tokens = set(self.known_tokens.items()).difference(self.parent.known_tokens.items())
+            if not changed_tokens:
+                return
+            offending_tokens = []
+            for key, child_value in changed_tokens:
+                if key not in self.parent.known_tokens:
+                    continue  # key added in child
+                parent_value = self.parent.known_tokens[key]
+                assert parent_value != child_value
+                if not self.segment_needs_expand_loop:
+                    offending_tokens.append((key, parent_value, child_value, "(child values can only grow if segment_needs_expand_loop is True)"))
+                elif not child_value.startswith(parent_value):
+                    offending_tokens.append((key, parent_value, child_value, "(child value is not an expansion of the parent value)"))
+                elif key in self.path_segments:
+                    offending_tokens.append((key, parent_value, child_value, "(already set path_segments may not change)"))
+                else:
+                    continue  # expansion of non-fixed child value is allowed in expand loop
+            if offending_tokens:
+                raise AssertionError(
+                    "Known data of child file %s doesn't include all data of its parent %s. "
+                    "Does your path format specification make sense? "
+                    "Offending tokens are:\n%s" % (self, self.parent, tabulate(
+                        offending_tokens,
+                        headers=["key", "parent value", "child value", "error"], missingval="None"
+                    ))
+                )
 
     # public properties  ###############################################################################################
 
     @cached_property
     def partial_path(self) -> str:
-        path_segments = self.path_segments
-        if self.segment_needs_expand_loop:
-            # preview the file path we're generating in the loop
-            path_segments = path_segments + (path_head(self.next_path_segments),)
-        partial = "/".join(path_segments).format(**self.known_tokens)
+        partial = join_path(*self.path_segments)
+        try:
+            partial = partial.format_map(self.known_tokens)
+        except KeyError:
+            missing_fields = set(get_format_str_fields(partial)).difference(self.known_tokens.keys())
+            assert not missing_fields, "Format specification '%s' is missing fields %s in known tokens of virtual path %s" % \
+                                       (partial, missing_fields, self)
+            raise
         partial = normalize_path(partial)
         return partial
 
     @cached_property
     def is_folder(self) -> bool:
-        return bool(self.next_path_segments)
+        return self.next_path_segments or self.segment_needs_expand_loop
 
     @cached_property
     def is_root(self) -> bool:
@@ -138,25 +157,32 @@ class VirtualPath(object):
         return self.__class__(**args)
 
     def __str__(self):
-        path_segments = [seg.format(**self.known_tokens) for seg in self.path_segments]
+        details = [
+            "root" if self.is_root else None,
+            "folder" if self.is_folder else "file",
+            "loop_path" if self.segment_needs_expand_loop else None
+        ]
 
-        if self.segment_needs_expand_loop and self._file:
-            # preview the file path we're generating in the loop
-            preview_file_path = path_head(self.next_path_segments).format(**self.known_tokens)
-            if preview_file_path:
-                path_segments.append("(" + preview_file_path + ")")
+        try:
+            path_segments = [seg.format_map(self.known_tokens) for seg in self.path_segments]
+        except KeyError:
+            # something is weird, we don't have all known_tokens to fulfill the current path format specification
+            # still try to complete str generation with as much debug information as possible
+            # and let `partial_path` (called in `validate`) raise the corresponding exception
+            details.append("known tokens incomplete: %s" % set(self.known_tokens.keys()))
 
-        path_segments += self.next_path_segments
+            path_segments = []
+            for seg in self.path_segments:
+                missing_fields = set(get_format_str_fields(seg)).difference(self.known_tokens.keys())
+                if missing_fields:
+                    path_segments.append("%s[!missing %s!]" % (seg, missing_fields))
+                else:
+                    path_segments.append(seg)
 
-        options = "[%s]->[%s]" % (
+        details.append("[%s]->[%s]" % (
             ",".join(str(v) for v in self.known_data.keys()),
-            ",".join(str(v) for v in self.content_options))
+            ",".join(str(v) for v in self.content_options)))
         return "[%s](%s)" % (
             "/".join(filter(bool, path_segments)),
-            ",".join(filter(bool, [
-                "root" if self.is_root else None,
-                "folder" if self.is_folder else "file",
-                "loop_path" if self.segment_needs_expand_loop else None,
-                options
-            ]))
+            ",".join(filter(bool, details))
         )
