@@ -2,6 +2,7 @@ import asyncio
 import functools
 import logging
 import os
+import re
 import time
 import warnings
 from typing import Dict, List, Mapping, Tuple, Union
@@ -12,7 +13,6 @@ from pyrsistent import freeze, pvector
 from requests import Session as HTTPSession
 from requests.auth import HTTPBasicAuth
 from studip_api.downloader import Download
-from studip_api.model import Course, File, Semester
 
 log = logging.getLogger(__name__)
 
@@ -78,15 +78,12 @@ class StudIPSession(object):
         await self.http.close()
 
     def _studip_url(self, url):
-        while True:
-            if url.startswith('/'):
-                url = url[1:]
-            elif url.startswith('studip'):
-                url = url[6:]
-            elif url.startswith('api.php'):
-                url = url[7:]
-            else:
-                break
+        prefix = "api.php"
+        index = url.find(prefix)
+        if index >= 0:
+            url = url[index + len(prefix):]
+        while url.startswith('/'):
+            url = url[1:]
         return self.studip_base + url
 
     async def _studip_json_req(self, endpoint):
@@ -102,6 +99,7 @@ class StudIPSession(object):
         discovery = await self._studip_json_req("discovery")
         for path in [
             "/user",
+            "/studip/settings",
             "/semesters",
             "/user/:user_id/courses",
             # "/course/:course_id",
@@ -118,28 +116,81 @@ class StudIPSession(object):
     async def get_user(self):
         return await self._studip_json_req("user")
 
+    async def get_settings(self):
+        return await self._studip_json_req("studip/settings")
+
     @async_generator
     async def get_semesters(self):  # -> AsyncGenerator[Dict, None]:
         await yield_from_(studip_iter(self._studip_json_req, "semesters"))
 
     @async_generator
-    async def get_courses(self, semester: Semester):  # -> AsyncGenerator[Dict, None]:
-        semesters = {semester["id"]: semester async for semester in self.get_semesters()}
+    async def get_courses(self, semester):  # -> AsyncGenerator[Dict, None]:
+        semesters = {self.extract_id(semester): semester async for semester in self.get_semesters()}
+        settings = await self.get_settings()
         user = await self.get_user()
-        async for course in studip_iter(
-                self._studip_json_req, "user/%s/courses?semester=%s" %
-                                       (user["user_id"], semester["id"])):
-            await yield_(course)
 
-    async def get_course_root_file(self, course: Course) -> Tuple[Dict, List, List]:
-        folder = await self._studip_json_req("/course/%s/top_folder" % course["course_id"])
-        return folder, folder.get("subfolders", []), folder.get("file_refs", [])
+        url = "user/%s/courses?semester=%s" % (self.extract_id(user), self.extract_id(semester))
+        async for course in studip_iter(self._studip_json_req, url):
+            course_ev = course.evolver()
+            if course.get("start_semester", None):
+                start_semester = semesters[self.extract_id(course["start_semester"])]
+                course_ev["start_semester"] = start_semester
+                course_ev["start_date"] = start_semester["begin"]
+            if course.get("end_semester", None):
+                end_semester = semesters[self.extract_id(course["end_semester"])]
+                course_ev["end_semester"] = end_semester
+                course_ev["end_date"] = end_semester["end"]
 
-    async def get_folder_details(self, folder: File) -> Tuple[Dict, List, List]:
-        folder = await self._studip_json_req("/folder/%s" % folder["id"])
-        return folder, folder.get("subfolders", []), folder.get("file_refs", [])
+            type_data = settings["SEM_TYPE"][course["type"]]
+            class_data = settings["SEM_CLASS"][type_data["class"]]
 
-    async def download_file_contents(self, studip_file: File, local_dest: str = None,
+            course_ev["type-nr"] = course["type"]
+            course_ev["type"] = type_data["name"]
+            course_ev["class"] = class_data["name"]
+
+            await yield_(course_ev.persistent())
+
+    async def get_course_root_file(self, course) -> Tuple[Dict, List, List]:
+        folder = await self._studip_json_req("/course/%s/top_folder" % self.extract_id(course))
+        return self.return_folder(folder)
+
+    async def get_folder_details(self, parent) -> Tuple[Dict, List, List]:
+        folder = await self._studip_json_req("/folder/%s" % self.extract_id(parent))
+        return self.return_folder(folder)
+
+    def return_folder(self, folder):
+        subfolders = folder.get("subfolders", [])
+        file_refs = folder.get("file_refs", [])
+
+        folder_ev = folder.evolver()
+        if "subfolders" in folder_ev:
+            folder_ev.remove("subfolders")
+        if "file_refs" in folder_ev:
+            folder_ev.remove("file_refs")
+        folder_ev.set("subfolder_count", len(subfolders))
+        folder_ev.set("file_count", len(file_refs))
+
+        return folder_ev.persistent(), \
+               pvector(self.extract_id(f) for f in subfolders), \
+               pvector(self.extract_id(f) for f in file_refs)
+
+    def extract_id(self, val):
+        if isinstance(val, Mapping):
+            if "id" in val:
+                return self.extract_id(val["id"])
+            if "course_id" in val:
+                return self.extract_id(val["course_id"])
+            if "user_id" in val:
+                return self.extract_id(val["user_id"])
+        elif isinstance(val, str):
+            m = re.fullmatch("(.*/)?(?P<id>[a-z0-9]{31,32})(\?.*)?", val.lower())
+            if m:
+                # print(len(m.group("id")), val, m.group("id"))
+                return m.group("id")
+
+        raise ValueError("can't extract id from %s '%s'" % (type(val), val))
+
+    async def download_file_contents(self, studip_file, local_dest: str = None,
                                      chunk_size: int = 1024 * 256) -> Download:
 
         async def on_completed(download, result: Union[List[range], Exception]):
