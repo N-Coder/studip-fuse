@@ -45,8 +45,8 @@ if __name__ == "__main__":
             "attrs",
             "cattrs",
             "cached_property",
-            "frozendict",
             "more_itertools",
+            "pyrsistent",
             "tabulate",
         ],
         entry_points={

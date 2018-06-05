@@ -7,6 +7,7 @@ from typing import Any, Dict, List, NewType, Optional, Set, Tuple, Type, Union
 import attr
 from cached_property import cached_property
 from frozendict import frozendict
+from pyrsistent import freeze
 from tabulate import tabulate
 
 from studip_fuse.avfs.path_util import normalize_path, path_head, path_tail
@@ -28,9 +29,9 @@ def get_format_str_fields(format_segment) -> Set[Type]:
 @attr.s(frozen=True, str=False)
 class VirtualPath(object):
     parent = attr.ib()  # type: Optional['VirtualPath']
-    path_segments = attr.ib(convert=tuple)  # type: Tuple[Union[str, FormatToken]]
-    known_data = attr.ib(convert=frozendict)  # type: frozendict[DataField, Any]
-    next_path_segments = attr.ib(convert=tuple)  # type: Tuple[Union[str, FormatToken]]
+    path_segments = attr.ib(convert=freeze)  # type: Tuple[Union[str, FormatToken]]
+    known_data = attr.ib(convert=freeze)  # type: Dict[DataField, Any]
+    next_path_segments = attr.ib(convert=freeze)  # type: Tuple[Union[str, FormatToken]]
 
     # __init__  ########################################################################################################
 
