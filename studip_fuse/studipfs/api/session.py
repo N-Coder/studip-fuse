@@ -8,6 +8,7 @@ from typing import Dict, List, Mapping, Tuple, Union
 
 import attr
 from async_generator import async_generator, yield_, yield_from_
+from pyrsistent import freeze, pvector
 from requests import Session as HTTPSession
 from requests.auth import HTTPBasicAuth
 from studip_api.downloader import Download
@@ -90,7 +91,7 @@ class StudIPSession(object):
 
     async def _studip_json_req(self, endpoint):
         resp = await self.http.get(self._studip_url(endpoint))
-        return resp.json()
+        return freeze(resp.json())
 
     async def do_login(self, username, password):
         # TODO add login methods
