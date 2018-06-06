@@ -150,13 +150,19 @@ class StudIPSession(object):
 
             await yield_(course_ev.persistent())
 
-    async def get_course_root_file(self, course) -> Tuple[Dict, List, List]:
+    async def get_course_root_folder(self, course) -> Tuple[Dict, List, List]:
         folder = await self._studip_json_req("/course/%s/top_folder" % self.extract_id(course))
         return self.return_folder(folder)
 
     async def get_folder_details(self, parent) -> Tuple[Dict, List, List]:
         folder = await self._studip_json_req("/folder/%s" % self.extract_id(parent))
         return self.return_folder(folder)
+
+    async def get_file_details(self, parent) -> Tuple[Dict, List, List]:
+        file = await self._studip_json_req("/file/%s" % self.extract_id(parent))
+        if file.get("id", None) != file.get("file_id", None):
+            warnings.warn("File has non-matching `(file_)id`s: %s" % file)
+        return file
 
     def return_folder(self, folder):
         subfolders = folder.get("subfolders", [])
