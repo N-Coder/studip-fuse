@@ -17,7 +17,8 @@ from more_itertools import one
 from studip_fuse.avfs.path_util import path_name
 from studip_fuse.avfs.real_path import RealPath
 from studip_fuse.studipfs.main_loop.start import setup_loop
-from studip_fuse.studipfs.main_loop.stop import ThreadSafeDefaultDict, await_loop_thread_shutdown
+from studip_fuse.studipfs.main_loop.stop import await_loop_thread_shutdown
+from studip_fuse.studipfs.main_loop.ts_defaultdict import ThreadSafeDefaultDict
 from studip_fuse.studipfs.path.studip_path import StudIPPath
 
 ENOATTR = getattr(errno, "ENOATTR", getattr(errno, "ENODATA"))
