@@ -4,7 +4,8 @@ import logging
 from concurrent.futures import CancelledError
 from contextlib import ExitStack, contextmanager
 
-from studip_fuse.studipfs.api.session import AsyncHTTPSession, StudIPSession
+from studip_fuse.aioutils.http import AsyncHTTPSession
+from studip_fuse.studipfs.api.session import StudIPSession
 
 log = logging.getLogger(__name__)
 

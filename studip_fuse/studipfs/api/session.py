@@ -1,5 +1,3 @@
-import asyncio
-import functools
 import logging
 import os
 import re
@@ -10,33 +8,10 @@ from typing import Dict, List, Mapping, Tuple, Union
 import attr
 from async_generator import async_generator, yield_, yield_from_
 from pyrsistent import freeze, pvector
-from requests import Session as HTTPSession
-from requests.auth import HTTPBasicAuth
-from studip_api.downloader import Download
+
+from studip_fuse.aioutils.downloader import Download
 
 log = logging.getLogger(__name__)
-
-
-# TODO move, add drop-in caching
-class AsyncHTTPSession(HTTPSession):
-    def __init__(self, loop=None, executor=None, *args, **kwargs):
-        self.loop = loop or asyncio.get_event_loop()
-        self.executor = executor
-        super(AsyncHTTPSession, self).__init__(*args, **kwargs)
-
-    async def __aenter__(self):
-        return self
-
-    async def __aexit__(self, *args):
-        await self.close()
-
-    def close(self):
-        return self.loop.run_in_executor(self.executor, super(AsyncHTTPSession, self).close)
-
-    async def request(self, *args, **kwargs):
-        resp = await self.loop.run_in_executor(self.executor, functools.partial(super(AsyncHTTPSession, self).request, *args, **kwargs))
-        resp.raise_for_status()
-        return resp
 
 
 @async_generator
@@ -66,7 +41,7 @@ async def studip_iter(get_next, start, max_total=None):  # -> AsyncGenerator[Dic
 @attr.s(hash=False, str=False, repr=False)
 class StudIPSession(object):
     studip_base = attr.ib()  # type: str
-    http = attr.ib()  # type: HTTPSession
+    http = attr.ib()  # type: "HTTPSession"
 
     async def __aenter__(self):
         return self
@@ -92,7 +67,7 @@ class StudIPSession(object):
 
     async def do_login(self, username, password):
         # TODO add login methods
-        self.http.auth = HTTPBasicAuth(username, password)
+        self.http.auth = (username, password)
         user_data = await self._studip_json_req("user")
         assert user_data["username"] == username
 

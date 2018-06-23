@@ -1,9 +1,7 @@
-import asyncio
 import logging
 import os
 import re
 import warnings
-from asyncio import Queue
 from datetime import datetime
 from enum import IntEnum
 from stat import S_IFDIR, S_IFREG, S_IRGRP, S_IROTH, S_IRUSR
@@ -13,59 +11,14 @@ import attr
 from async_generator import async_generator, yield_
 from cached_property import cached_property
 
+from studip_fuse.aioutils.downloader import Download
+from studip_fuse.aioutils.pipeline import Pipeline
 from studip_fuse.avfs.path_util import join_path, path_head, path_name
 from studip_fuse.avfs.virtual_path import FormatToken, VirtualPath, get_format_str_fields
-from studip_fuse.studipfs.api.downloader import Download
 from studip_fuse.studipfs.api.session import StudIPSession
 from studip_fuse.studipfs.path.encoding import Charset, EscapeMode, escape_file_name
 
 log = logging.getLogger(__name__)
-
-
-# TODO move
-class Pipeline(object):
-    done_obj = object()
-
-    def __init__(self):
-        self.queues = [Queue()]
-        self.tasks = []
-
-    def put(self, item):
-        self.queues[0].put_nowait(item)
-
-    @async_generator
-    async def drain(self):
-        self.queues[0].put_nowait(self.done_obj)
-        await asyncio.gather(*self.tasks)
-
-        queue = self.queues[-1]
-        while True:
-            item = await queue.get()
-            try:
-                if item is self.done_obj:
-                    break
-                else:
-                    await yield_(item)
-            finally:
-                queue.task_done()
-
-    async def __processor(self, in_queue, out_queue, func):
-        while True:
-            item = await in_queue.get()
-            try:
-                if item is self.done_obj:
-                    out_queue.put_nowait(self.done_obj)
-                    break
-                else:
-                    await func(item, out_queue)
-            finally:
-                in_queue.task_done()
-
-    def add_processor(self, func):
-        in_queue = self.queues[-1]
-        out_queue = Queue()
-        self.queues.append(out_queue)
-        self.tasks.append(self.__processor(in_queue=in_queue, out_queue=out_queue, func=func))
 
 
 class DataField(IntEnum):
