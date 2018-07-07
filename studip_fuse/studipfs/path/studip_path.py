@@ -146,7 +146,7 @@ class StudIPPath(VirtualPath):
                 d["st_size"] = self._folder.size
         return d
 
-    async def getxattrs(self):
+    async def getxattr(self):
         # TODO implement based on extended known_tokens
         # "folder-id": self.__escape(self._folder["id"]),  # '3c90ca04794bce6661f985c664a5d6cd'
         # "folder-name": self.__escape(self._folder["name"]),  # 'Virtuelle Maschinen und Laufzeitsysteme'
@@ -156,6 +156,7 @@ class StudIPPath(VirtualPath):
         # "is_visible": self.__escape(self._folder["is_visible"]),  # True
         # "is_readable": self.__escape(self._folder["is_readable"]),  # True
         # "is_writable": self.__escape(self._folder["is_writable"]),  # True
+        # TODO "user.studip-fuse.contents-status" / "user.studip-fuse.contents-exception" for folder / file get_content_task
         return {}
 
     async def open_file(self, flags) -> Download:
