@@ -131,6 +131,10 @@ class VirtualPath(object):
         pass
 
     @abstractmethod
+    async def getxattr(self) -> Dict[str, str]:
+        pass
+
+    @abstractmethod
     async def open_file(self, flags) -> Any:
         pass
 

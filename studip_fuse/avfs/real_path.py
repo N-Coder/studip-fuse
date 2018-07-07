@@ -54,6 +54,12 @@ class RealPath(object):
         return {key: val for key, val in st.items() if key in
                 ('st_atime', 'st_ctime', 'st_gid', 'st_mode', 'st_mtime', 'st_nlink', 'st_size', 'st_uid')}
 
+    async def getxattr(self):
+        xattrs = {}
+        for vp in self.generating_vps:
+            xattrs.update(await vp.getxattr())
+        return xattrs
+
     async def open_file(self, flags):
         return await one(self.generating_vps).open_file(flags)
 
