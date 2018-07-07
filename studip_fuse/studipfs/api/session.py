@@ -65,6 +65,22 @@ class StudIPSession(object):
         resp = await self.http.get(self._studip_url(endpoint))
         return freeze(resp.json())
 
+    @classmethod
+    def with_middleware(cls, async_annotation, agen_annotation, download_annotation, name="GenericMiddlewareStudIPSession"):
+        return type(name, (cls,), {
+            "do_login": async_annotation(cls.do_login),
+            "get_user": async_annotation(cls.get_user),
+            "get_settings": async_annotation(cls.get_settings),
+            "get_course_root_folder": async_annotation(cls.get_course_root_folder),
+            "get_folder_details": async_annotation(cls.get_folder_details),
+            "get_file_details": async_annotation(cls.get_file_details),
+
+            "get_semesters": agen_annotation(cls.get_semesters),
+            "get_courses": agen_annotation(cls.get_courses),
+
+            "download_file_contents": download_annotation(cls.download_file_contents),
+        })
+
     async def do_login(self, username, password):
         # TODO add login methods
         self.http.auth = (username, password)
