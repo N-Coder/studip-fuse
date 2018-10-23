@@ -13,19 +13,19 @@ def parse_args():
     opts_parser = argparse.ArgumentParser(add_help=False)
     opts_parser.add_argument("-o", help="FUSE-like options", nargs="+", action=StoreNameValuePair(opts_parser))
     opts_parser.add_argument("-d", "--debug", help="turn on all debugging options", action="store_true")
-    opts_parser.add_argument("--debug-logging", help="turn on debug logging", action="store_true")
+    opts_parser.add_argument("-v", "--debug-logging", help="turn on debug logging", action="store_true")
 
     studip_opts = opts_parser.add_argument_group("Stud.IP Driver Options")
     studip_opts.add_argument("--pwfile", help="path to password file or '-' to read from stdin",
                              default=os.path.join(dirs.user_config_dir, ".studip-pw"))
     studip_opts.add_argument("--format", help="format specifier for virtual paths",
-                             default="{semester-lexical-short}/{course}/{type}/{short-path}/{name}")
+                             default="{semester}/{course}/{course-type}/{short-path}/{file-name}")
     studip_opts.add_argument("--cache", help="path to cache directory", default=dirs.user_cache_dir)
     studip_opts.add_argument("--studip", help="Stud.IP base URL", default="https://studip.uni-passau.de/studip/api.php/")
     studip_opts.add_argument("--sso", help="SSO base URL", default="https://sso.uni-passau.de")
 
     fuse_opts = opts_parser.add_argument_group("FUSE Options")
-    fuse_opts.add_argument("--foreground", help="run in foreground", action="store_true")
+    fuse_opts.add_argument("-f", "--foreground", help="run in foreground", action="store_true")
     fuse_opts.add_argument("--nothreads", help="single threads for FUSE", action="store_true")
     fuse_opts.add_argument("--allow-other", help="allow access by all users", action="store_true")
     fuse_opts.add_argument("--allow-root", help="allow access by root", action="store_true")
