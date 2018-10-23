@@ -128,8 +128,8 @@ class StudIPPath(VirtualPath):
     async def getattr(self):
         d = dict(st_ino=hash(self.partial_path), st_nlink=1,
                  st_mode=S_IFDIR if self.is_folder else S_IFREG)
-        # TODO update
-        if self.is_folder or self._folder.is_accessible:
+        # TODO update; is_readable vs is_downloadable for files / folders?
+        if self.is_folder or self._file.is_downloadable:
             d["st_mode"] |= S_IRUSR | S_IRGRP | S_IROTH
         if hasattr(os, "getuid"):
             d["st_uid"] = os.getuid()
@@ -140,10 +140,7 @@ class StudIPPath(VirtualPath):
         if self.mod_times[1]:
             d["st_mtime"] = self.mod_times[1].timestamp()
         if not self.is_folder:
-            if self._folder.size is None:
-                log.warning("Size of file %s unknown, because the value wasn't loaded from Stud.IP", self._folder)
-            else:
-                d["st_size"] = self._folder.size
+            d["st_size"] = int(self._file.size)  # TODO this is a str
         return d
 
     async def getxattr(self):
@@ -284,11 +281,19 @@ class StudIPPath(VirtualPath):
 
     @cached_property
     def mod_times(self) -> Tuple[Optional[datetime], Optional[datetime]]:
-        if self._folder:
-            return self._folder["mkdate"], self._folder["chdate"]
-        if self._course:
-            return (self._course.semester["start_date"],) * 2
+        vals = None
         if self._semester:
             # "begin", "end", "seminars_begin", "seminars_end"
-            return (datetime.fromtimestamp(self._semester["begin"]),) * 2
-        return None, None
+            vals = (self._semester["begin"],) * 2
+        if self._course:
+            vals = (self._course["start_date"],) * 2
+        if self._folder:
+            vals = self._folder["mkdate"], self._folder["chdate"]
+        if self._file:
+            vals = self._file["mkdate"], self._file["chdate"]  # TODO this is a str
+
+        if vals:
+            # noinspection PyTypeChecker
+            return tuple(datetime.fromtimestamp(int(val)) for val in vals)
+        else:
+            return None, None
