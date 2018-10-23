@@ -1,13 +1,11 @@
 import logging
-import os
 import re
-import time
 import warnings
-from typing import Dict, List, Mapping, Tuple, Union
+from typing import AsyncGenerator, Dict, List, Mapping, Tuple, Union
 
 import attr
-from async_generator import async_generator, yield_, yield_from_
-from pyrsistent import freeze, pvector
+from async_generator import async_generator, yield_
+from pyrsistent import freeze, pmap, pvector
 
 from studip_fuse.aioutils.downloader import Download
 
@@ -62,7 +60,7 @@ class StudIPSession(object):
         return self.studip_base + url
 
     async def _studip_json_req(self, endpoint):
-        resp = await self.http.get(self._studip_url(endpoint))
+        resp = await self.http.get(self._studip_url(endpoint))  # TODO close request object
         return freeze(resp.json())
 
     @classmethod
