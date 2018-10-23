@@ -4,7 +4,7 @@ import logging
 from concurrent.futures import CancelledError
 from contextlib import ExitStack, contextmanager
 
-from studip_fuse.aioutils.http import AsyncHTTPSession
+from studip_fuse.aioutils.http import AsyncCachedHTTPSession
 from studip_fuse.studipfs.api.session import StudIPSession
 
 log = logging.getLogger(__name__)
@@ -75,8 +75,8 @@ def session_context(args, http_args, loop, future: concurrent.futures.Future):
     log.info("Opening StudIP session...")
 
     # TODO make mockable
-    session = CachedStudIPSession(
-        loop=loop, studip_base=args.studip, sso_base=args.sso, cache_dir=args.cache, http_args=http_args)
+    session = StudIPSession(studip_base=args.studip, http=AsyncCachedHTTPSession())
+    # loop=loop, studip_base=args.studip, sso_base=args.sso, cache_dir=args.cache, http_args=http_args)
     try:
         coro = session.do_login(username=args.user, password=args.get_password())
         task = asyncio.ensure_future(coro, loop=loop)
