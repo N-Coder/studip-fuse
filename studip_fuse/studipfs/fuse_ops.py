@@ -34,6 +34,14 @@ def log_status(status, args=None, level=logging.INFO):
     logging.getLogger("studip_fuse.status").log(level, " ".join(["%s"] * len(args)), *args)
 
 
+def syncify(asyncfun):
+    @functools.wraps(asyncfun)
+    def sync_wrapper(self, *args, **kwargs):
+        return self.async_result(asyncfun, self, *args, **kwargs)
+
+    return sync_wrapper
+
+
 @attr.s(hash=False)
 class FUSEView(object):
     args = attr.ib()
@@ -119,27 +127,19 @@ class FUSEView(object):
         # TODO make this replaceable by e.g trio.BlockingTrioPortal.run(afn, *args)
         return asyncio.run_coroutine_threadsafe(corofn(*args, **kwargs), self.loop).result()
 
-    @staticmethod
-    def syncify(asyncfun):
-        @functools.wraps(asyncfun)
-        def sync_wrapper(self, *args, **kwargs):
-            return self.async_result(asyncfun, self, *args, **kwargs)
-
-        return sync_wrapper
-
     @syncify
     async def _resolve(self, path: str) -> RealPath:
         return await self.root_rp.resolve(path)
 
     @syncify
-    async def readdir(self, path) -> List[str]:
+    async def readdir(self, path, fh=None) -> List[str]:
         resolved_real_file = await self.root_rp.resolve(path)
         if not resolved_real_file:
-            return -errno.ENOENT
+            raise FuseOSError(errno.ENOENT)
         elif resolved_real_file.is_folder:
             return ['.', '..'] + [path_name(rp.path) for rp in await resolved_real_file.list_contents()]
         else:
-            return -errno.ENOTDIR
+            raise FuseOSError(errno.ENOTDIR)
 
     @syncify
     async def access(self, path, mode):
@@ -151,27 +151,27 @@ class FUSEView(object):
     async def getattr(self, path, fh=None):
         resolved_real_file = await self.root_rp.resolve(path)
         if not resolved_real_file:
-            return -errno.ENOENT
+            raise FuseOSError(errno.ENOENT)
         else:
-            return resolved_real_file.getattr()
+            return await resolved_real_file.getattr()
 
     @syncify
     async def getxattr(self, path, name, position=0):
         resolved_real_file = await self.root_rp.resolve(path)
         if not resolved_real_file:
-            return -errno.ENOENT
+            raise FuseOSError(errno.ENOENT)
         else:
             xattr = await resolved_real_file.getxattr()
             if name in xattr:
                 return xattr[name]
             else:
-                return -ENOATTR
+                raise FuseOSError(ENOATTR)
 
     @syncify
     async def listxattr(self, path):
         resolved_real_file = await self.root_rp.resolve(path)
         if not resolved_real_file:
-            return -errno.ENOENT
+            raise FuseOSError(errno.ENOENT)
         else:
             xattr = await resolved_real_file.getxattr()
             return list(xattr.keys())
@@ -179,9 +179,9 @@ class FUSEView(object):
     def open(self, path, flags):
         resolved_real_file: RealPath = self._resolve(path)
         if not resolved_real_file:
-            return -errno.ENOENT
+            raise FuseOSError(errno.ENOENT)
         elif resolved_real_file.is_folder:
-            return -errno.EISDIR
+            raise FuseOSError(errno.EISDIR)
         else:
             download = self.async_result(resolved_real_file.open_file, flags)
             if os.name == 'nt' and not flags & getattr(os, "O_TEXT", 16384):
