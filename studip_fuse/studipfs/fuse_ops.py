@@ -1,4 +1,3 @@
-import asyncio
 import concurrent.futures
 import errno
 import functools
@@ -6,9 +5,10 @@ import inspect
 import logging.handlers
 import os
 import pprint
-from asyncio import BaseEventLoop
+import threading
+from collections import defaultdict
 from threading import Lock, Thread
-from typing import Dict, List
+from typing import Callable, Dict, List, NamedTuple
 
 import attr
 from attr import Factory
@@ -17,11 +17,6 @@ from studip_fuse.aioutils.interface import Download
 from studip_fuse.avfs.path_util import path_name
 from studip_fuse.avfs.real_path import RealPath
 from studip_fuse.launcher.fuse import FuseOSError, fuse_get_context
-from studip_fuse.studipfs.api.session import StudIPSession
-from studip_fuse.studipfs.main_loop.start import setup_loop
-from studip_fuse.studipfs.main_loop.stop import await_loop_thread_shutdown
-from studip_fuse.studipfs.main_loop.ts_defaultdict import ThreadSafeDefaultDict
-from studip_fuse.studipfs.path.studip_path import StudIPPath
 
 ENOATTR = getattr(errno, "ENOATTR", getattr(errno, "ENODATA"))
 
@@ -35,25 +30,52 @@ def log_status(status, args=None, level=logging.INFO):
     logging.getLogger("studip_fuse.status").log(level, " ".join(["%s"] * len(args)), *args)
 
 
+def join_thread(loop_thread):
+    import sys
+    import traceback
+
+    counter = 0
+    while loop_thread.is_alive() and counter < 4:
+        loop_thread.join(5)
+        counter += 1
+        if loop_thread.is_alive():
+            log.info("Waiting for loop thread to abort...")
+            if log.isEnabledFor(logging.DEBUG):
+                stack = sys._current_frames()[loop_thread.ident]
+                stack = stack[0] if isinstance(stack, list) else stack
+                log.debug("Thread stack trace:\n %s", "".join(traceback.format_stack(stack)))
+
+    if loop_thread.is_alive():
+        log.warning("Shutting down main thread and thus killing hung event loop daemon thread")
+
+
+LoopSetupResult = NamedTuple("LoopSetupResult", [
+    ("loop_stop_fn", Callable),
+    ("loop_run_fn", Callable),
+    ("root_rp", RealPath),
+])
+
+
 def syncify(asyncfun):
     @functools.wraps(asyncfun)
     def sync_wrapper(self, *args, **kwargs):
-        return self.async_result(asyncfun, self, *args, **kwargs)
+        return self.loop_run_fn(asyncfun, self, *args, **kwargs)
 
     return sync_wrapper
 
 
 @attr.s(hash=False)
 class FUSEView(object):
-    args = attr.ib()
-    http_args = attr.ib()
-    fuse_args = attr.ib()
+    log_args = attr.ib()
+    loop_setup_fn = attr.ib()
 
     loop_future = attr.ib(init=False, default=None)
     loop_thread = attr.ib(init=False, default=None)
-    loop = attr.ib(init=False, default=None)  # type: BaseEventLoop
-    session = attr.ib(init=False, default=None)  # type: StudIPSession # TODO abstract session away, only look at root_rp returned from external start method
+
+    loop_stop_fn = attr.ib(init=False, default=None)
+    loop_run_fn = attr.ib(init=False, default=None)
     root_rp = attr.ib(init=False, default=None)  # type: RealPath
+
     open_files = attr.ib(init=False, default=Factory(dict))  # type: Dict[str, Download]
     read_locks = attr.ib(init=False, repr=False, default=Factory(lambda: ThreadSafeDefaultDict(Lock)))
 
@@ -85,48 +107,32 @@ class FUSEView(object):
                 log_ops.debug('<- %s %s', op, self.saferepr(ret))
 
     def init(self, path):
-        log_status("INITIALIZING", args=self.args)
-        log.info("Mounting at %s (uid=%s, gid=%s, pid=%s, python pid=%s)", path, *fuse_get_context(),
-                 os.getpid())
+        log_status("INITIALIZING", args=self.log_args)
+        log.info("Mounting at %s (uid=%s, gid=%s, pid=%s, python pid=%s)", path, *fuse_get_context(), os.getpid())
 
-        # TODO make mockable: setup_loop for trio, StudIPPath for caching
         self.loop_future = concurrent.futures.Future()
-        self.loop_thread = Thread(target=setup_loop, args=(self.args, self.http_args, self.loop_future),
-                                  name="aio event loop", daemon=True)
+        self.loop_thread = Thread(target=self.loop_setup_fn, name="aio event loop", daemon=True)
         self.loop_thread.start()
-        log.debug("Event loop thread started, waiting for session initialization")
-        self.loop, self.session = self.loop_future.result()
 
-        vp = StudIPPath(session=self.session, path_segments=[], known_data={}, parent=None,
-                        next_path_segments=self.args.format.split("/"))
-        self.root_rp = RealPath(parent=None, generating_vps={vp})
-        log.debug("Session and virtual FS initialized")
+        log.debug("Event loop thread started, waiting for initialization to complete")
+        self.loop_stop_fn, self.loop_run_fn, self.root_rp = self.loop_future.result()
 
-        log_status("READY", args=self.args)
+        log_status("READY", args=self.log_args)
         log.info("Mounting complete")
 
     def destroy(self, path):
-        log_status("STOPPING", args=self.args)
+        log_status("STOPPING", args=self.log_args)
         log.info("Unmounting from %s (uid=%s, gid=%s, pid=%s, python pid=%s)", path, *fuse_get_context(),
                  os.getpid())
 
         if self.loop_future:
             self.loop_future.cancel()
-        # TODO loop should be abstract / replaceable with trio loop, so no specific shut-down code here
-        if self.loop and self.loop.is_running():
-            self.loop.call_soon_threadsafe(self.loop.stop)
+        if self.loop_stop_fn:
+            self.loop_stop_fn()
         if self.loop_thread:
-            await_loop_thread_shutdown(self.loop, self.loop_thread)
+            join_thread(self.loop_thread)
 
         log.info("Unmounting complete")
-
-    def async_result(self, corofn, *args, **kwargs):
-        assert not inspect.iscoroutine(corofn)
-        assert inspect.iscoroutinefunction(corofn)
-        if not self.loop:
-            raise RuntimeError("Can't await async operation while event loop isn't available")
-        # TODO make this replaceable by e.g trio.BlockingTrioPortal.run(afn, *args)
-        return asyncio.run_coroutine_threadsafe(corofn(*args, **kwargs), self.loop).result()
 
     @syncify
     async def _resolve(self, path: str) -> RealPath:
@@ -184,7 +190,7 @@ class FUSEView(object):
         elif resolved_real_file.is_folder:
             raise FuseOSError(errno.EISDIR)
         else:
-            download = self.async_result(resolved_real_file.open_file, flags)  # type: Download
+            download = self.loop_run_fn(resolved_real_file.open_file, flags)  # type: Download
             if os.name == 'nt' and not flags & getattr(os, "O_TEXT", 16384):
                 flags |= os.O_BINARY
             fileno = os.open(download.local_path, flags)
@@ -194,7 +200,7 @@ class FUSEView(object):
     def read(self, path, length, offset, fh):
         download = self.open_files.get(fh, None)
         if download:
-            self.async_result(download.await_readable, offset, length)
+            self.loop_run_fn(download.await_readable, offset, length)
 
         with self.read_locks[fh]:
             os.lseek(fh, offset, os.SEEK_SET)
@@ -209,3 +215,16 @@ class FUSEView(object):
     def release(self, path, fh):
         self.open_files.pop(fh, None)
         return os.close(fh)
+
+
+class ThreadSafeDefaultDict(defaultdict):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.__lock = threading.Lock()
+
+    def __missing__(self, key):
+        with self.__lock:
+            if key in self:
+                return super().__getitem__(key)
+            else:
+                return super().__missing__(key)
