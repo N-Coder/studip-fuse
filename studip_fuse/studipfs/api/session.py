@@ -1,13 +1,13 @@
 import logging
 import re
 import warnings
-from typing import AsyncGenerator, Dict, List, Mapping, Tuple, Union
+from typing import AsyncGenerator, List, Mapping, Tuple
 
 import attr
 from async_generator import async_generator, yield_
 from pyrsistent import freeze, pmap, pvector
 
-from studip_fuse.aioutils.downloader import Download
+from studip_fuse.aioutils.interface import FileStore, HTTPSession
 
 log = logging.getLogger(__name__)
 
@@ -39,7 +39,8 @@ async def studip_iter(get_next, start, max_total=None):  # -> AsyncGenerator[Dic
 @attr.s(hash=False, str=False, repr=False)
 class StudIPSession(object):
     studip_base = attr.ib()  # type: str
-    http = attr.ib()  # type: "HTTPSession"
+    http = attr.ib()  # type: HTTPSession
+    storage = attr.ib()  # type: FileStore
 
     async def __aenter__(self):
         return self
@@ -49,6 +50,7 @@ class StudIPSession(object):
 
     async def close(self):
         await self.http.close()
+        await self.storage.close()
 
     def _studip_url(self, url):
         prefix = "api.php"
@@ -185,39 +187,10 @@ class StudIPSession(object):
 
         raise ValueError("can't extract id from %s '%s'" % (type(val), val))
 
-    async def download_file_contents(self, studip_file, local_dest: str = None,
-                                     chunk_size: int = 1024 * 256) -> Download:
-
-        async def on_completed(download, result: Union[List[range], Exception]):
-            if isinstance(result, Exception):
-                log.warning("Download %s -> %s failed", studip_file, local_dest, exc_info=True)
-            else:
-                log.info("Completed download %s -> %s", studip_file, local_dest)
-
-                val = 0
-                for r in result:
-                    if not r.start <= val:
-                        warnings.warn("Non-connected ranges from Download %s: %s" % (download, result))
-                    val = r.stop
-                if val != download.total_length:
-                    warnings.warn("Length of downloaded data doesn't equal length reported by Stud.IP for Download %s: %s"
-                                  % (download, result))
-
-                if studip_file.changed:
-                    timestamp = time.mktime(studip_file.changed.timetuple())
-                    await self.loop.run_in_executor(None, os.utime, local_dest, (timestamp, timestamp))
-                else:
-                    log.warning("Can't set timestamp of file %s :: %s, because the value wasn't loaded from Stud.IP",
-                                studip_file, local_dest)
-
-                return result
-
-        log.info("Starting download %s -> %s", studip_file, local_dest)
-        try:
-            download = Download(self.ahttp, self._studip_url("file/%s/download" % studip_file), local_dest, chunk_size)
-            download.on_completed.append(on_completed)
-            await download.start()
-        except:
-            log.warning("Download %s -> %s could not be started", studip_file, local_dest, exc_info=True)
-            raise
-        return download
+    def retrieve_file(self, file):
+        return self.storage.retrieve(
+            uid=file["id"],  # TODO should uid be the file revision id or the (unchangeable) id of the file
+            url=self._studip_url("file/%s/download" % file["id"]),  # this requires "id", not "file_id"
+            overwrite_created=file["chdate"],  # TODO or file["mkdate"] # TODO datetime.fromtimestamp(...) here?
+            expected_size=file["size"]
+        )

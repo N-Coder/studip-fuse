@@ -3,9 +3,14 @@ from asyncio import Queue
 
 from async_generator import async_generator, yield_
 
+from studip_fuse.aioutils.interface import Pipeline
+
 
 # TODO instead of using queues, the async funcs could also be replaced by chained async_generators
-class Pipeline(object):
+# TODO this could be replaced by aioreactive/ reactive python
+
+
+class AsyncioPipeline(Pipeline):
     done_obj = object()
 
     def __init__(self):

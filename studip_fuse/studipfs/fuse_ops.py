@@ -12,10 +12,11 @@ from typing import Dict, List
 
 import attr
 from attr import Factory
-from fuse import FuseOSError, fuse_get_context
 
+from studip_fuse.aioutils.interface import Download
 from studip_fuse.avfs.path_util import path_name
 from studip_fuse.avfs.real_path import RealPath
+from studip_fuse.launcher.fuse import FuseOSError, fuse_get_context
 from studip_fuse.studipfs.api.session import StudIPSession
 from studip_fuse.studipfs.main_loop.start import setup_loop
 from studip_fuse.studipfs.main_loop.stop import await_loop_thread_shutdown
@@ -51,7 +52,7 @@ class FUSEView(object):
     loop_future = attr.ib(init=False, default=None)
     loop_thread = attr.ib(init=False, default=None)
     loop = attr.ib(init=False, default=None)  # type: BaseEventLoop
-    session = attr.ib(init=False, default=None)  # type: StudIPSession
+    session = attr.ib(init=False, default=None)  # type: StudIPSession # TODO abstract session away, only look at root_rp returned from external start method
     root_rp = attr.ib(init=False, default=None)  # type: RealPath
     open_files = attr.ib(init=False, default=Factory(dict))  # type: Dict[str, Download]
     read_locks = attr.ib(init=False, repr=False, default=Factory(lambda: ThreadSafeDefaultDict(Lock)))
@@ -183,7 +184,7 @@ class FUSEView(object):
         elif resolved_real_file.is_folder:
             raise FuseOSError(errno.EISDIR)
         else:
-            download = self.async_result(resolved_real_file.open_file, flags)
+            download = self.async_result(resolved_real_file.open_file, flags)  # type: Download
             if os.name == 'nt' and not flags & getattr(os, "O_TEXT", 16384):
                 flags |= os.O_BINARY
             fileno = os.open(download.local_path, flags)
