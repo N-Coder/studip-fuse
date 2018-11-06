@@ -10,10 +10,11 @@ from pyrsistent import freeze, pmap, pvector
 from studip_fuse.aioutils.interface import FileStore, HTTPSession
 
 log = logging.getLogger(__name__)
+Dict = pmap
 
 
 @async_generator
-async def studip_iter(get_next, start, max_total=None):  # -> AsyncGenerator[Dict, None]
+async def studip_iter_(get_next, start, max_total=None):
     endpoint = start
     last_seen = None
     limit = max_total
@@ -35,6 +36,14 @@ async def studip_iter(get_next, start, max_total=None):  # -> AsyncGenerator[Dic
         except KeyError:
             break
 
+
+def studip_iter(get_next, start, max_total=None) -> AsyncGenerator[Dict, None]:  # fix type information for PyCharm
+    # noinspection PyTypeChecker
+    return studip_iter_(get_next, start, max_total)
+
+
+# Old docs: https://docs.studip.de/develop/Entwickler/RESTAPI
+# New docs: https://hilfe.studip.de/develop/Entwickler/RESTAPI
 
 @attr.s(hash=False, str=False, repr=False)
 class StudIPSession(object):
@@ -61,9 +70,9 @@ class StudIPSession(object):
             url = url[1:]
         return self.studip_base + url
 
-    async def _studip_json_req(self, endpoint):
+    async def _studip_json_req(self, endpoint) -> Dict:
         resp = await self.http.get(self._studip_url(endpoint))  # TODO close request object
-        return freeze(resp.json())
+        return freeze(resp.json())  # TODO this must probably be awaited, too
 
     @classmethod
     def with_middleware(cls, async_annotation, agen_annotation, download_annotation, name="GenericMiddlewareStudIPSession"):
@@ -104,18 +113,17 @@ class StudIPSession(object):
             assert path in discovery
             assert "get" in discovery[path]
 
-    async def get_user(self):
+    async def get_user(self) -> Dict:
         return await self._studip_json_req("user")
 
-    async def get_settings(self):
+    async def get_settings(self) -> Dict:
         return await self._studip_json_req("studip/settings")
 
-    @async_generator
-    async def get_semesters(self):  # -> AsyncGenerator[Dict, None]:
-        await yield_from_(studip_iter(self._studip_json_req, "semesters"))
+    def get_semesters(self) -> AsyncGenerator[Dict, None]:
+        return studip_iter(self._studip_json_req, "semesters")
 
     @async_generator
-    async def get_courses(self, semester):  # -> AsyncGenerator[Dict, None]:
+    async def get_courses_(self, semester):
         semesters = {self.extract_id(semester): semester async for semester in self.get_semesters()}
         settings = await self.get_settings()
         user = await self.get_user()
@@ -141,6 +149,10 @@ class StudIPSession(object):
 
             await yield_(course_ev.persistent())
 
+    def get_courses(self, semester) -> AsyncGenerator[Dict, None]:  # fix type information for PyCharm
+        # noinspection PyTypeChecker
+        return self.get_courses(semester)
+
     async def get_course_root_folder(self, course) -> Tuple[Dict, List, List]:
         folder = await self._studip_json_req("/course/%s/top_folder" % self.extract_id(course))
         return self.return_folder(folder)
@@ -149,13 +161,13 @@ class StudIPSession(object):
         folder = await self._studip_json_req("/folder/%s" % self.extract_id(parent))
         return self.return_folder(folder)
 
-    async def get_file_details(self, parent) -> Tuple[Dict, List, List]:
+    async def get_file_details(self, parent) -> Dict:
         file = await self._studip_json_req("/file/%s" % self.extract_id(parent))
         if file.get("id", None) != file.get("file_id", None):
             warnings.warn("File has non-matching `(file_)id`s: %s" % file)
         return file
 
-    def return_folder(self, folder):
+    def return_folder(self, folder) -> Tuple[Dict, List, List]:
         subfolders = folder.get("subfolders", [])
         file_refs = folder.get("file_refs", [])
 
