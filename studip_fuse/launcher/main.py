@@ -2,9 +2,8 @@ import logging
 import logging.config
 import os
 
-from fuse import FUSE, fuse_get_context
-
 from studip_fuse.launcher.cmd_util import parse_args
+from studip_fuse.launcher.fuse import FUSE, fuse_get_context
 from studip_fuse.launcher.log_utils import configure_logging
 from studip_fuse.studipfs.fuse_ops import FUSEView, log_status
 
