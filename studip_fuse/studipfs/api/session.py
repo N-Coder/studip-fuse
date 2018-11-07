@@ -58,8 +58,7 @@ class StudIPSession(object):
         await self.close()
 
     async def close(self):
-        await self.http.close()
-        await self.storage.close()
+        pass  # no clean-up needed, http and storage are closed externally by the loop impl
 
     def _studip_url(self, url):
         prefix = "api.php"
@@ -87,7 +86,7 @@ class StudIPSession(object):
             "get_semesters": agen_annotation(cls.get_semesters),
             "get_courses": agen_annotation(cls.get_courses),
 
-            "download_file_contents": download_annotation(cls.download_file_contents),
+            "retrieve_file": download_annotation(cls.retrieve_file),  # FIXME this should be filestore middleware
         })
 
     async def do_login(self, username, password):
@@ -151,7 +150,7 @@ class StudIPSession(object):
 
     def get_courses(self, semester) -> AsyncGenerator[Dict, None]:  # fix type information for PyCharm
         # noinspection PyTypeChecker
-        return self.get_courses(semester)
+        return self.get_courses_(semester)
 
     async def get_course_root_folder(self, course) -> Tuple[Dict, List, List]:
         folder = await self._studip_json_req("/course/%s/top_folder" % self.extract_id(course))
@@ -199,8 +198,8 @@ class StudIPSession(object):
 
         raise ValueError("can't extract id from %s '%s'" % (type(val), val))
 
-    def retrieve_file(self, file):
-        return self.storage.retrieve(
+    async def retrieve_file(self, file):
+        return await self.storage.retrieve(
             uid=file["id"],  # TODO should uid be the file revision id or the (unchangeable) id of the file
             url=self._studip_url("file/%s/download" % file["id"]),  # this requires "id", not "file_id"
             overwrite_created=file["chdate"],  # TODO or file["mkdate"] # TODO datetime.fromtimestamp(...) here?

@@ -5,7 +5,7 @@ import warnings
 from datetime import datetime
 from enum import IntEnum
 from stat import S_IFDIR, S_IFREG, S_IRGRP, S_IROTH, S_IRUSR
-from typing import Any, Dict, Optional, Set, Tuple
+from typing import Any, Dict, Optional, Set, Tuple, Type
 
 import attr
 from async_generator import async_generator, yield_
@@ -36,6 +36,7 @@ File = DataField.File
 @attr.s(frozen=True, str=False, repr=False, hash=False)
 class StudIPPath(VirtualPath):
     session = attr.ib()  # type: StudIPSession
+    pipeline_type = attr.ib()  # type: Type[Pipeline]
 
     def validate(self):
         inv_keys = set(self.known_data.keys()).difference(DataField)
@@ -72,7 +73,7 @@ class StudIPPath(VirtualPath):
             await yield_(self._mk_sub_path())
         else:
             needs = [field for field in DataField if has < field <= wants]
-            pipeline = Pipeline()
+            pipeline = self.pipeline_type()
             if Semester in needs:
                 pipeline.add_processor(self.__list_semesters)
             if Course in needs:
@@ -157,7 +158,7 @@ class StudIPPath(VirtualPath):
 
     async def open_file(self, flags) -> Download:
         assert not self.is_folder, "open_file called on folder %s" % self
-        return await self.session.download_file_contents(self._file)
+        return await self.session.retrieve_file(self._file)
 
     # public properties  ###############################################################################################
 
