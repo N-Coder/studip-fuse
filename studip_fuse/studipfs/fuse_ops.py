@@ -111,7 +111,7 @@ class FUSEView(object):
         log.info("Mounting at %s (uid=%s, gid=%s, pid=%s, python pid=%s)", path, *fuse_get_context(), os.getpid())
 
         self.loop_future = concurrent.futures.Future()
-        self.loop_thread = Thread(target=self.loop_setup_fn, name="aio event loop", daemon=True)
+        self.loop_thread = Thread(target=self.loop_setup_fn, args=(self.loop_future,), name="aio event loop", daemon=True)
         self.loop_thread.start()
 
         log.debug("Event loop thread started, waiting for initialization to complete")

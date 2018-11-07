@@ -1,7 +1,7 @@
 from abc import ABC, abstractmethod
 from datetime import datetime
 from queue import Queue
-from typing import AsyncGenerator, Awaitable, Callable, Generic, Iterable, Optional, TypeVar
+from typing import Any, AsyncGenerator, Awaitable, Callable, Coroutine, Generic, Iterable, Optional, TypeVar
 
 import attr
 
@@ -18,20 +18,18 @@ class Pipeline(ABC, Generic[T]):
         pass
 
     @abstractmethod
-    def add_processor(self, func: Callable[[T, Queue[T]], None]):
+    def add_processor(self, func: Callable[[T, "Queue[T]"], Coroutine[Any, Any, None]]):
         pass
 
 
-class AsyncCloseable(ABC):
-    @abstractmethod
+class AsyncCloseable(object):
     async def close(self):
         pass
 
 
-@attr.s()
 class FileStore(ABC, AsyncCloseable):
     @abstractmethod
-    def retrieve(self, uid: str, url: str, overwrite_created: Optional[datetime] = None, expected_size: Optional[int] = None) -> "Download":
+    async def retrieve(self, uid: str, url: str, overwrite_created: Optional[datetime] = None, expected_size: Optional[int] = None) -> "Download":
         # TODO should id be the file revision id or the (unchangeable) id of the file
         pass
 
@@ -86,15 +84,8 @@ class Request(ABC, AsyncCloseable, Awaitable):
 
 
 class HTTPSession(ABC, AsyncCloseable):
-    async def close(self):
-        pass
-
     @abstractmethod
     async def request(self, method, url, **kwargs) -> Request:
-        pass
-
-    @abstractmethod
-    async def download(self, url, local_path, **kwargs) -> Download:
         pass
 
     @abstractmethod

@@ -1,38 +1,60 @@
 import asyncio
 import concurrent.futures
+import inspect
 import logging
+from asyncio import AbstractEventLoop
 from concurrent.futures import CancelledError
 from contextlib import ExitStack, contextmanager
 
+from studip_fuse.aioutils.asyncio_impl.filestore import AsyncioFileStore as AFileStore
 from studip_fuse.aioutils.asyncio_impl.http import AsyncioSyncRequestsCachedHTTPSession as AHTTPSession
+from studip_fuse.aioutils.asyncio_impl.pipeline import AsyncioPipeline
+from studip_fuse.avfs.real_path import RealPath
 from studip_fuse.studipfs.api.session import StudIPSession
+from studip_fuse.studipfs.fuse_ops import LoopSetupResult
+from studip_fuse.studipfs.path.studip_path import StudIPPath
 
 log = logging.getLogger(__name__)
 
 
-def setup_loop(args, http_args, future: concurrent.futures.Future):
-    with ExitStack() as stack:
-        future = stack.enter_context(future_context(future))
-        future.check_cancelled()
-        loop = stack.enter_context(loop_context(args))
-        future.check_cancelled()
-        session = stack.enter_context(session_context(args, http_args, loop, future))
-        future.check_cancelled()
+def setup_asyncio_loop(args):
+    def start(future: concurrent.futures.Future):
+        with ExitStack() as stack:
+            future = stack.enter_context(future_context(future))
+            check_cancelled(future)
+            loop = stack.enter_context(loop_context(args))  # type: AbstractEventLoop
+            check_cancelled(future)
+            root_rp = stack.enter_context(session_context(args, loop, future))
+            check_cancelled(future)
 
-        log.info("Loop and session ready, sending result back to main thread")
-        future.set_result((loop, session))
+            log.info("Loop and session ready, sending result back to main thread")
 
-        log.info("Running asyncio event loop...")
-        loop.run_forever()
+            def async_result(corofn, *args, **kwargs):
+                assert not inspect.iscoroutine(corofn)
+                assert inspect.iscoroutinefunction(corofn)
+                if not loop.is_running():
+                    log.warning("Submitting coroutinefunction %s to paused main asyncio loop %s, this shouldn't happen",
+                                corofn, loop)
+                return asyncio.run_coroutine_threadsafe(corofn(*args, **kwargs), loop).result()
+
+            future.set_result(LoopSetupResult(
+                loop_stop_fn=lambda: loop.call_soon_threadsafe(loop.stop),
+                loop_run_fn=async_result,
+                root_rp=root_rp))
+
+            log.info("Running asyncio event loop...")
+            loop.run_forever()
+
+    return start
+
+
+def check_cancelled(future):
+    if future.cancelled():
+        raise CancelledError()
 
 
 @contextmanager
 def future_context(future):
-    def check_cancelled():
-        if future.cancelled():
-            raise CancelledError()
-
-    future.check_cancelled = check_cancelled
     try:
         yield future
     except Exception as e:
@@ -57,8 +79,9 @@ def loop_context(args):
     try:
         yield loop
     finally:
-        async def shutdown_loop_async(loop):
+        async def drain_loop_async(loop):
             log.debug("Draining loop")
+            # loop.stop will already have been called, otherwise run_forever wouldn't have terminated
             await asyncio.sleep(1)
             try:
                 await loop.shutdown_asyncgens()
@@ -66,31 +89,38 @@ def loop_context(args):
                 pass  # shutdown_asyncgens was added in 3.6
             log.debug("Loop drained")
 
-        loop.run_until_complete(shutdown_loop_async(loop))
+        loop.run_until_complete(drain_loop_async(loop))
+        loop.close()
         log.info("Event loop closed")
 
 
 @contextmanager
-def session_context(args, http_args, loop, future: concurrent.futures.Future):
+def session_context(args, loop, future: concurrent.futures.Future):
     log.info("Opening StudIP session...")
 
     # TODO make mockable
-    session = StudIPSession(studip_base=args.studip, http=AHTTPSession())
-    # loop=loop, studip_base=args.studip, sso_base=args.sso, cache_dir=args.cache, http_args=http_args)
+    http = AHTTPSession()
+    storage = AFileStore(http=http, location=args.cache)
+    session = StudIPSession(studip_base=args.studip, http=http, storage=storage)
     try:
         coro = session.do_login(username=args.user, password=args.get_password())
         task = asyncio.ensure_future(coro, loop=loop)
         future.add_done_callback(lambda f: task.cancel() if f.cancelled() else None)
 
-        future.check_cancelled()
+        check_cancelled(future)
         loop.run_until_complete(task)
         # loop.run_until_complete(session.load_model(update=True))
 
-        yield session
+        root_vp = StudIPPath(parent=None, path_segments=[], known_data={}, next_path_segments=args.format.split("/"),
+                             session=session, pipeline_type=AsyncioPipeline)
+        root_rp = RealPath(parent=None, generating_vps={root_vp})
+        yield root_rp
     finally:
         async def shutdown_session_async(session):
             log.debug("Closing session")
             await session.close()
+            await storage.close()
+            await http.close()
             log.debug("Session closed")
 
         log.info("Initiating shut down sequence...")
