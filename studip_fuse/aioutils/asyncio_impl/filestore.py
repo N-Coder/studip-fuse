@@ -1,25 +1,43 @@
+import functools
+import logging
+import re
 from datetime import datetime
-from typing import Optional
+from typing import Dict, Optional
 
 import attr
 
+from studip_fuse.aioutils.asyncio_impl.http import AsyncioSyncRequestsHTTPSession
 from studip_fuse.aioutils.interface import Download, FileStore
+from studip_fuse.avfs.path_util import join_path
+
+log = logging.getLogger(__name__)
 
 
 @attr.s()
 class AsyncioFileStore(FileStore):
     http = attr.ib()  # type: AsyncioSyncRequestsHTTPSession
-    location = attr.ib()
+    location = attr.ib()  # type: str
+
+    cache = attr.ib(init=False, default=attr.Factory(dict))  # type: Dict[str,Download]
 
     async def retrieve(self, uid: str, url: str, overwrite_created: Optional[datetime] = None, expected_size: Optional[int] = None) -> "Download":
-        pass
+        if uid in self.cache:
+            return self.cache[uid]
+        else:
+            download = AsyncioSyncRequestsDownload(uid, url, join_path(self.location, uid), self.http)
+            self.cache[uid] = download
+            return download
 
 
 @attr.s()
 class AsyncioSyncRequestsDownload(Download):
     http = attr.ib()  # type: AsyncioSyncRequestsHTTPSession
-    total_length = attr.ib(init=False, default=-1)  # type: int
+    _total_length = attr.ib(init=False, default=-1)  # type: int
     future = attr.ib(init=False, default=None)  # type: Future
+
+    @property
+    def total_length(self):
+        return self._total_length
 
     @property
     def is_running(self):
@@ -36,13 +54,12 @@ class AsyncioSyncRequestsDownload(Download):
     async def await_readable(self, offset=0, length=-1):
         if self.is_running:
             await self.future
-        assert self.is_completed
+        assert self.is_completed, "Download %s not done" % self # FIXME reraise cause?
 
     async def start(self):
         assert not self.is_running
         if not self.is_completed:
             self.future = self.http.loop.run_in_executor(self.http.executor, functools.partial(self.sync_start))
-            await self.future
 
     def sync_start(self):
         with open(self.local_path, "wb", buffering=0) as f:
@@ -51,18 +68,18 @@ class AsyncioSyncRequestsDownload(Download):
                 self.__extract_total_length(r)
                 # self.fileio.truncate(self.total_length)
 
-                while True:
-                    chunk = r.iter_content(chunk_size=None, decode_unicode=False)
+                for chunk in r.iter_content(chunk_size=None, decode_unicode=False):
                     if not chunk:
                         break
                     f.write(chunk)
+                    # TODO re-add updates on_completed
 
     def __extract_total_length(self, r):
         accept_ranges = r.headers.get("Accept-Ranges", "")
         if accept_ranges != "bytes":
             log.debug("Server is not indicating Accept-Ranges for file download:\n%s\n%s",
-                      r.request_info, r)
-        total_length = r.content_length or r.headers.get("Content-Length", None)
+                      r.request, r)
+        total_length = getattr(r, "content_length", None) or r.headers.get("Content-Length", None)
         if not total_length and "Content-Range" in r.headers:
             content_range = r.headers["Content-Range"]
             log.debug("Stud.IP didn't send Content-Length but Content-Range '%s'", content_range)
@@ -71,4 +88,4 @@ class AsyncioSyncRequestsDownload(Download):
                       match.groups() if match else "()")
             total_length = match.group(3)
         assert total_length, "Could not extract total file length from response %s" % repr(Download)
-        self.total_length = int(total_length)
+        self._total_length = int(total_length)
