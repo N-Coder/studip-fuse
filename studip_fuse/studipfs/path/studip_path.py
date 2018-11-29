@@ -11,9 +11,9 @@ import attr
 from async_generator import async_generator, yield_
 from cached_property import cached_property
 
-from studip_fuse.aioutils.interface import Download, Pipeline
 from studip_fuse.avfs.path_util import join_path, path_head, path_name
 from studip_fuse.avfs.virtual_path import FormatToken, VirtualPath, get_format_str_fields
+from studip_fuse.studipfs.api.aiointerface import Download, Pipeline
 from studip_fuse.studipfs.api.session import StudIPSession
 from studip_fuse.studipfs.path.encoding import Charset, EscapeMode, escape_file_name
 

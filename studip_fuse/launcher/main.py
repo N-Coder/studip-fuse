@@ -2,11 +2,11 @@ import logging
 import logging.config
 import os
 
+import studip_fuse.launcher.aioimpl.asyncio as aioimpl_asyncio
 from studip_fuse.launcher.cmd_util import parse_args
 from studip_fuse.launcher.fuse import FUSE, fuse_get_context
 from studip_fuse.launcher.log_utils import configure_logging
 from studip_fuse.studipfs.fuse_ops import FUSEView, log_status
-from studip_fuse.studipfs.main_loop.loop_asyncio import setup_asyncio_loop
 
 
 def main():
@@ -24,7 +24,7 @@ def main():
         if args.debug_fuse:
             from studip_fuse.studipfs.fuse_ops import log_ops
             log_ops.setLevel(logging.DEBUG)
-        fuse_ops = FUSEView(log_args=args, loop_setup_fn=setup_asyncio_loop(args=args))
+        fuse_ops = FUSEView(log_args=args, loop_setup_fn=aioimpl_asyncio.setup_loop(args=args))
 
         if args.pwfile == "-":
             from getpass import getpass

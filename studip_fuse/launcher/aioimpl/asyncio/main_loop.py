@@ -4,12 +4,13 @@ import inspect
 import logging
 from asyncio import AbstractEventLoop
 from concurrent.futures import CancelledError
-from contextlib import ExitStack, contextmanager
+from contextlib import AsyncExitStack, ExitStack, contextmanager
 
-from studip_fuse.aioutils.asyncio_impl.filestore import AsyncioFileStore as AFileStore
-from studip_fuse.aioutils.asyncio_impl.http import AsyncioSyncRequestsCachedHTTPSession as AHTTPSession
-from studip_fuse.aioutils.asyncio_impl.pipeline import AsyncioPipeline
+import aiohttp
+
+import studip_fuse.launcher.aioimpl.asyncio as aioimpl_asyncio
 from studip_fuse.avfs.real_path import RealPath
+from studip_fuse.studipfs.api.aiointerface import HTTPClient
 from studip_fuse.studipfs.api.session import StudIPSession
 from studip_fuse.studipfs.fuse_ops import LoopSetupResult
 from studip_fuse.studipfs.path.studip_path import StudIPPath
@@ -95,33 +96,36 @@ def loop_context(args):
 
 
 @contextmanager
-def session_context(args, loop, future: concurrent.futures.Future):
-    log.info("Opening StudIP session...")
+def session_context(args, loop, future: concurrent.futures.Future, ioimpl=aioimpl_asyncio, pathimpl=StudIPPath):
+    stack = AsyncExitStack()
 
-    # TODO make mockable
-    http = AHTTPSession()
-    storage = AFileStore(http=http, location=args.cache)
-    session = StudIPSession(studip_base=args.studip, http=http, storage=storage)
-    try:
-        coro = session.do_login(username=args.user, password=args.get_password())
-        task = asyncio.ensure_future(coro, loop=loop)
-        future.add_done_callback(lambda f: task.cancel() if f.cancelled() else None)
-
+    async def enter():
+        http_client: HTTPClient = await stack.enter_async_context(
+            ioimpl.HTTPClient(http_session=aiohttp.ClientSession, storage_dir=args.cache)
+        )
+        session = StudIPSession(studip_base=args.studip, http=http_client)
         check_cancelled(future)
-        loop.run_until_complete(task)
-        # loop.run_until_complete(session.load_model(update=True))
 
-        root_vp = StudIPPath(parent=None, path_segments=[], known_data={}, next_path_segments=args.format.split("/"),
-                             session=session, pipeline_type=AsyncioPipeline)
+        log.info("Logging in...")
+        await http_client.basic_auth(url=session.studip_url("user"), username=args.user, password=args.get_password())
+        await session.check_login(username=args.user)
+
+        root_vp = pathimpl(parent=None, path_segments=[], known_data={}, next_path_segments=args.format.split("/"),
+                           session=session, pipeline_type=ioimpl.Pipeline)
         root_rp = RealPath(parent=None, generating_vps={root_vp})
-        yield root_rp
+        return root_rp
+
+    try:
+        log.info("Opening StudIP session...")
+        task = asyncio.ensure_future(enter(), loop=loop)
+        future.add_done_callback(lambda f: task.cancel() if f.cancelled() else None)
+        check_cancelled(future)
+        yield loop.run_until_complete(task)
     finally:
-        async def shutdown_session_async(session):
+        async def exit():
             log.debug("Closing session")
-            await session.close()
-            await storage.close()
-            await http.close()
+            await stack.aclose()
             log.debug("Session closed")
 
         log.info("Initiating shut down sequence...")
-        loop.run_until_complete(shutdown_session_async(session))
+        loop.run_until_complete(exit())

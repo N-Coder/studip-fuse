@@ -13,10 +13,10 @@ from typing import Callable, Dict, List, NamedTuple
 import attr
 from attr import Factory
 
-from studip_fuse.aioutils.interface import Download
 from studip_fuse.avfs.path_util import path_name
 from studip_fuse.avfs.real_path import RealPath
 from studip_fuse.launcher.fuse import FuseOSError, fuse_get_context
+from studip_fuse.studipfs.api.aiointerface import Download
 
 ENOATTR = getattr(errno, "ENOATTR", getattr(errno, "ENODATA"))
 
@@ -191,7 +191,8 @@ class FUSEView(object):
             raise FuseOSError(errno.EISDIR)
         else:
             download = self.loop_run_fn(resolved_real_file.open_file, flags)  # type: Download
-            self.loop_run_fn(download.start) # TODO when to start?
+            self.loop_run_fn(download.start_loading)  # TODO when / how to start?
+            self.loop_run_fn(download.await_readable)
             if os.name == 'nt' and not flags & getattr(os, "O_TEXT", 16384):
                 flags |= os.O_BINARY
             fileno = os.open(download.local_path, flags)

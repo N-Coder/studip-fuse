@@ -5,12 +5,11 @@ from typing import AsyncGenerator, List, Mapping, Tuple
 
 import attr
 from async_generator import async_generator, yield_
-from pyrsistent import freeze, pmap, pvector
+from pyrsistent import pvector as FrozenList
 
-from studip_fuse.aioutils.interface import FileStore, HTTPSession
+from studip_fuse.studipfs.api.aiointerface import FrozenDict, HTTPClient
 
 log = logging.getLogger(__name__)
-Dict = pmap
 
 
 @async_generator
@@ -37,7 +36,7 @@ async def studip_iter_(get_next, start, max_total=None):
             break
 
 
-def studip_iter(get_next, start, max_total=None) -> AsyncGenerator[Dict, None]:  # fix type information for PyCharm
+def studip_iter(get_next, start, max_total=None) -> AsyncGenerator[FrozenDict, None]:  # fix type information for PyCharm
     # noinspection PyTypeChecker
     return studip_iter_(get_next, start, max_total)
 
@@ -48,19 +47,9 @@ def studip_iter(get_next, start, max_total=None) -> AsyncGenerator[Dict, None]: 
 @attr.s(hash=False, str=False, repr=False)
 class StudIPSession(object):
     studip_base = attr.ib()  # type: str
-    http = attr.ib()  # type: HTTPSession
-    storage = attr.ib()  # type: FileStore
+    http = attr.ib()  # type: HTTPClient
 
-    async def __aenter__(self):
-        return self
-
-    async def __aexit__(self, exc_type, exc_val, exc_tb):
-        await self.close()
-
-    async def close(self):
-        pass  # no clean-up needed, http and storage are closed externally by the loop impl
-
-    def _studip_url(self, url):
+    def studip_url(self, url):
         prefix = "api.php"
         index = url.find(prefix)
         if index >= 0:
@@ -69,14 +58,12 @@ class StudIPSession(object):
             url = url[1:]
         return self.studip_base + url
 
-    async def _studip_json_req(self, endpoint) -> Dict:
-        resp = await self.http.get(self._studip_url(endpoint))  # TODO close request object
-        return freeze(resp.json())  # TODO this must probably be awaited, too
+    async def get_studip_json(self, url):
+        return await self.http.get_json(self.studip_url(url))
 
     @classmethod
     def with_middleware(cls, async_annotation, agen_annotation, download_annotation, name="GenericMiddlewareStudIPSession"):
         return type(name, (cls,), {
-            "do_login": async_annotation(cls.do_login),
             "get_user": async_annotation(cls.get_user),
             "get_settings": async_annotation(cls.get_settings),
             "get_course_root_folder": async_annotation(cls.get_course_root_folder),
@@ -86,16 +73,14 @@ class StudIPSession(object):
             "get_semesters": agen_annotation(cls.get_semesters),
             "get_courses": agen_annotation(cls.get_courses),
 
-            "retrieve_file": download_annotation(cls.retrieve_file),  # FIXME this should be filestore middleware
+            "retrieve_file": download_annotation(cls.retrieve_file),
         })
 
-    async def do_login(self, username, password):
-        # TODO add login methods
-        self.http.auth = (username, password)
-        user_data = await self._studip_json_req("user")
+    async def check_login(self, username):
+        user_data = await self.get_studip_json("user")
         assert user_data["username"] == username
 
-        discovery = await self._studip_json_req("discovery")
+        discovery = await self.get_studip_json("discovery")
         for path in [
             "/user",
             "/studip/settings",
@@ -112,14 +97,14 @@ class StudIPSession(object):
             assert path in discovery
             assert "get" in discovery[path]
 
-    async def get_user(self) -> Dict:
-        return await self._studip_json_req("user")
+    async def get_user(self) -> FrozenDict:
+        return await self.get_studip_json("user")
 
-    async def get_settings(self) -> Dict:
-        return await self._studip_json_req("studip/settings")
+    async def get_settings(self) -> FrozenDict:
+        return await self.get_studip_json("studip/settings")
 
-    def get_semesters(self) -> AsyncGenerator[Dict, None]:
-        return studip_iter(self._studip_json_req, "semesters")
+    def get_semesters(self) -> AsyncGenerator[FrozenDict, None]:
+        return studip_iter(self.get_studip_json, "semesters")
 
     @async_generator
     async def get_courses_(self, semester):
@@ -128,7 +113,7 @@ class StudIPSession(object):
         user = await self.get_user()
 
         url = "user/%s/courses?semester=%s" % (self.extract_id(user), self.extract_id(semester))
-        async for course in studip_iter(self._studip_json_req, url):
+        async for course in studip_iter(self.get_studip_json, url):
             course_ev = course.evolver()
             if course.get("start_semester", None):
                 start_semester = semesters[self.extract_id(course["start_semester"])]
@@ -148,25 +133,25 @@ class StudIPSession(object):
 
             await yield_(course_ev.persistent())
 
-    def get_courses(self, semester) -> AsyncGenerator[Dict, None]:  # fix type information for PyCharm
+    def get_courses(self, semester) -> AsyncGenerator[FrozenDict, None]:  # fix type information for PyCharm
         # noinspection PyTypeChecker
         return self.get_courses_(semester)
 
-    async def get_course_root_folder(self, course) -> Tuple[Dict, List, List]:
-        folder = await self._studip_json_req("/course/%s/top_folder" % self.extract_id(course))
+    async def get_course_root_folder(self, course) -> Tuple[FrozenDict, List, List]:
+        folder = await self.get_studip_json("/course/%s/top_folder" % self.extract_id(course))
         return self.return_folder(folder)
 
-    async def get_folder_details(self, parent) -> Tuple[Dict, List, List]:
-        folder = await self._studip_json_req("/folder/%s" % self.extract_id(parent))
+    async def get_folder_details(self, parent) -> Tuple[FrozenDict, List, List]:
+        folder = await self.get_studip_json("/folder/%s" % self.extract_id(parent))
         return self.return_folder(folder)
 
-    async def get_file_details(self, parent) -> Dict:
-        file = await self._studip_json_req("/file/%s" % self.extract_id(parent))
+    async def get_file_details(self, parent) -> FrozenDict:
+        file = await self.get_studip_json("/file/%s" % self.extract_id(parent))
         if file.get("id", None) != file.get("file_id", None):
             warnings.warn("File has non-matching `(file_)id`s: %s" % file)
         return file
 
-    def return_folder(self, folder) -> Tuple[Dict, List, List]:
+    def return_folder(self, folder) -> Tuple[FrozenDict, List, List]:
         subfolders = folder.get("subfolders", [])
         file_refs = folder.get("file_refs", [])
 
@@ -179,8 +164,8 @@ class StudIPSession(object):
         folder_ev.set("file_count", len(file_refs))
 
         return folder_ev.persistent(), \
-               pvector(self.extract_id(f) for f in subfolders), \
-               pvector(self.extract_id(f) for f in file_refs)
+               FrozenList(self.extract_id(f) for f in subfolders), \
+               FrozenList(self.extract_id(f) for f in file_refs)
 
     def extract_id(self, val):
         if isinstance(val, Mapping):
@@ -199,9 +184,9 @@ class StudIPSession(object):
         raise ValueError("can't extract id from %s '%s'" % (type(val), val))
 
     async def retrieve_file(self, file):
-        return await self.storage.retrieve(
+        return await self.http.retrieve(
             uid=file["id"],  # TODO should uid be the file revision id or the (unchangeable) id of the file
-            url=self._studip_url("file/%s/download" % file["id"]),  # this requires "id", not "file_id"
+            url=self.studip_url("file/%s/download" % file["id"]),  # this requires "id", not "file_id"
             overwrite_created=file["chdate"],  # TODO or file["mkdate"] # TODO datetime.fromtimestamp(...) here?
             expected_size=file["size"]
         )
