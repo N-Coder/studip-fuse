@@ -41,7 +41,7 @@ class AiohttpClient(BaseHTTPClient):
         if callable(self.http_session):
             self.http_session = self.http_session()
         self.http_session = await self.exit_stack.enter_async_context(self.http_session)
-        self.get_json = alru_cache(self.get_json, loop=self.loop)
+        self.get_json = alru_cache(self.get_json, loop=self.loop, cache_exceptions=False)
         return self
 
     async def __aexit__(self, exc_type, exc_val, exc_tb):

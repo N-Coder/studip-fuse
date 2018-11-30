@@ -7,6 +7,7 @@ from concurrent.futures import CancelledError
 from contextlib import AsyncExitStack, ExitStack, contextmanager
 
 import aiohttp
+from async_lru import alru_cache
 
 import studip_fuse.launcher.aioimpl.asyncio as aioimpl_asyncio
 from studip_fuse.avfs.real_path import RealPath
@@ -95,8 +96,13 @@ def loop_context(args):
         log.info("Event loop closed")
 
 
+cache = alru_cache(loop="loop", cls=True, cache_exceptions=False)
+CachingRealPath = RealPath.with_middleware(cache, cache)
+
+
 @contextmanager
-def session_context(args, loop, future: concurrent.futures.Future, ioimpl=aioimpl_asyncio, pathimpl=StudIPPath):
+def session_context(args, loop, future: concurrent.futures.Future, ioimpl=aioimpl_asyncio,
+                    vpathimpl=StudIPPath, rpathimpl=CachingRealPath):
     stack = AsyncExitStack()
 
     async def enter():
@@ -110,9 +116,9 @@ def session_context(args, loop, future: concurrent.futures.Future, ioimpl=aioimp
         await http_client.shib_auth(start_url=args.sso, username=args.user, password=args.get_password())
         await session.check_login(username=args.user)
 
-        root_vp = pathimpl(parent=None, path_segments=[], known_data={}, next_path_segments=args.format.split("/"),
-                           session=session, pipeline_type=ioimpl.Pipeline)
-        root_rp = RealPath(parent=None, generating_vps={root_vp})
+        root_vp = vpathimpl(parent=None, path_segments=[], known_data={}, next_path_segments=args.format.split("/"),
+                            session=session, pipeline_type=ioimpl.Pipeline)
+        root_rp = rpathimpl(parent=None, generating_vps={root_vp})
         return root_rp
 
     try:

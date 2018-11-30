@@ -7,6 +7,7 @@ from typing import Dict, List, Optional, Set
 import attr
 from cached_property import cached_property
 from more_itertools import one, unique_everseen
+from pyrsistent import freeze
 
 from studip_fuse.avfs.path_util import normalize_path, path_head, path_name, path_tail
 from studip_fuse.avfs.virtual_path import VirtualPath
@@ -17,7 +18,7 @@ log = logging.getLogger(__name__)
 @attr.s(frozen=True, str=False)
 class RealPath(object):
     parent = attr.ib()  # type: 'RealPath'
-    generating_vps = attr.ib()  # type: Set[VirtualPath]
+    generating_vps = attr.ib(converter=freeze)  # type: Set[VirtualPath]
 
     @generating_vps.validator
     def validate(self, *_):
@@ -62,6 +63,13 @@ class RealPath(object):
 
     async def open_file(self, flags):
         return await one(self.generating_vps).open_file(flags)
+
+    @classmethod
+    def with_middleware(cls, resolve_annotation, list_contents_annotation, name="GenericMiddlewareRealPath"):
+        return type(name, (cls,), {
+            "resolve": resolve_annotation(cls.resolve),
+            "list_contents": list_contents_annotation(cls.list_contents),
+        })
 
     async def resolve(self, rel_path) -> Optional['RealPath']:
         rel_path = normalize_path(rel_path)
