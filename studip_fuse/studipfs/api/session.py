@@ -6,6 +6,7 @@ from typing import AsyncGenerator, List, Mapping, Tuple
 import attr
 from async_generator import async_generator, yield_
 from pyrsistent import pvector as FrozenList
+from yarl import URL
 
 from studip_fuse.studipfs.api.aiointerface import FrozenDict, HTTPClient
 
@@ -41,22 +42,24 @@ def studip_iter(get_next, start, max_total=None) -> AsyncGenerator[FrozenDict, N
     return studip_iter_(get_next, start, max_total)
 
 
+def append_base_url_slash(value):
+    value = URL(value)
+    if not value.path.endswith("/"):
+        log.warning("StudIP API %s must end with a slash. Appending '/' to make path concatenation work correctly.", repr(value))
+        value = value.with_path(value.path + "/")
+    return value
+
+
 # Old docs: https://docs.studip.de/develop/Entwickler/RESTAPI
 # New docs: https://hilfe.studip.de/develop/Entwickler/RESTAPI
 
 @attr.s(hash=False, str=False, repr=False)
 class StudIPSession(object):
-    studip_base = attr.ib()  # type: str
+    studip_base = attr.ib(converter=append_base_url_slash)  # type: URL
     http = attr.ib()  # type: HTTPClient
 
     def studip_url(self, url):
-        prefix = "api.php"
-        index = url.find(prefix)
-        if index >= 0:
-            url = url[index + len(prefix):]
-        while url.startswith('/'):
-            url = url[1:]
-        return self.studip_base + url
+        return self.studip_base.join(URL(url))
 
     async def get_studip_json(self, url):
         return await self.http.get_json(self.studip_url(url))
@@ -138,15 +141,15 @@ class StudIPSession(object):
         return self.get_courses_(semester)
 
     async def get_course_root_folder(self, course) -> Tuple[FrozenDict, List, List]:
-        folder = await self.get_studip_json("/course/%s/top_folder" % self.extract_id(course))
+        folder = await self.get_studip_json("course/%s/top_folder" % self.extract_id(course))
         return self.return_folder(folder)
 
     async def get_folder_details(self, parent) -> Tuple[FrozenDict, List, List]:
-        folder = await self.get_studip_json("/folder/%s" % self.extract_id(parent))
+        folder = await self.get_studip_json("folder/%s" % self.extract_id(parent))
         return self.return_folder(folder)
 
     async def get_file_details(self, parent) -> FrozenDict:
-        file = await self.get_studip_json("/file/%s" % self.extract_id(parent))
+        file = await self.get_studip_json("file/%s" % self.extract_id(parent))
         if file.get("id", None) != file.get("file_id", None):
             warnings.warn("File has non-matching `(file_)id`s: %s" % file)
         return file

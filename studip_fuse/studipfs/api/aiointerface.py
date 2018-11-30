@@ -48,7 +48,7 @@ class HTTPClient(AsyncContextManager, ABC):
         pass
 
     @abstractmethod
-    async def shib_auth(self, url, username, password) -> HTTPResponse:
+    async def shib_auth(self, start_url, username, password) -> HTTPResponse:
         # url is the starting point of the Shibboleth flow, e.g. self._studip_url("/studip/index.php?again=yes&sso=shib")
         # response is the page we've got forwarded to after the login was successfull
         pass

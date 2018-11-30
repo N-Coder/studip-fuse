@@ -15,6 +15,7 @@ import attr
 from async_lru import alru_cache
 from bs4 import BeautifulSoup
 from pyrsistent import freeze
+from yarl import URL
 
 from studip_fuse.studipfs.api.aiointerface import Download, HTTPClient, HTTPResponse
 
@@ -22,9 +23,7 @@ log = logging.getLogger(__name__)
 
 
 def parse_login_form(html):
-    with open("/tmp/login_form.html", "w") as f:
-        f.write(html)
-    soup = BeautifulSoup(html)
+    soup = BeautifulSoup(html, 'lxml')
     for form in soup.find_all('form'):
         if 'action' in form.attrs:
             return form.attrs['action']
@@ -32,9 +31,7 @@ def parse_login_form(html):
 
 
 def parse_saml_form(html):
-    with open("/tmp/saml_form.html", "w") as f:
-        f.write(html)
-    soup = BeautifulSoup(html)
+    soup = BeautifulSoup(html, 'lxml')
     saml_fields = {'RelayState', 'SAMLResponse'}
     form_data = {}
     form_url = None
@@ -44,6 +41,7 @@ def parse_saml_form(html):
     for input in soup.find_all('input'):
         if 'name' in input.attrs and 'value' in input.attrs and input.attrs['name'] in saml_fields:
             form_data[input.attrs['name']] = input.attrs['value']
+            form_url = input.find_parent("form").attrs['action']
 
     return form_url, form_data
 
@@ -103,13 +101,11 @@ class AiohttpClient(HTTPClient):
     async def oauth2_auth(self, *args) -> HTTPResponse:
         raise NotImplementedError()
 
-    async def shib_auth(self, url, username, password) -> HTTPResponse:
-        if not url:
-            url = "/studip/index.php?again=yes&sso=shib"
-
-        async with self.http_session.get(url) as resp:
+    async def shib_auth(self, start_url, username, password) -> HTTPResponse:
+        async with self.http_session.get(start_url) as resp:
             resp.raise_for_status()
             post_url = parse_login_form(await resp.text())
+            post_url = URL(resp.url).join(URL(post_url))
 
         async with self.http_session.post(
                 post_url,
@@ -117,14 +113,16 @@ class AiohttpClient(HTTPClient):
                     "j_username": username,
                     "j_password": password,
                     "uApprove.consent-revocation": "",
-                    "_eventId_proceed": ""
+                    "_eventId_proceed": "",
+                    "donotcache": "",
+                    "_shib_idp_revokeConsent": "false"
                 }) as resp:
             resp.raise_for_status()
             form_url, form_data = parse_saml_form(await resp.text())
+            form_url = URL(resp.url).join(URL(form_url))
 
         async with self.http_session.post(form_url, data=form_data) as resp:
             resp.raise_for_status()
-            # TODO check that were redirected to Stud.IP and aren't trapped in Shib (due to expired/wrong password etc)
             try:
                 return HTTPResponse(resp.url, resp.headers, await resp.json())
             except aiohttp.ContentTypeError:
