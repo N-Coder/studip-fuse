@@ -3,6 +3,7 @@ import enum
 import logging
 import os
 import re
+import time
 from asyncio import Future
 from contextlib import AsyncExitStack
 from datetime import datetime
@@ -10,8 +11,10 @@ from stat import S_ISREG
 from typing import Callable, Dict, Optional, Union
 
 import aiofiles
+import aiofiles.os
 import aiohttp
 import attr
+from async_generator import asynccontextmanager
 from async_lru import alru_cache
 from bs4 import BeautifulSoup
 from pyrsistent import freeze
@@ -20,6 +23,9 @@ from yarl import URL
 from studip_fuse.studipfs.api.aiointerface import Download, HTTPClient, HTTPResponse
 
 log = logging.getLogger(__name__)
+
+async_stat = aiofiles.os.stat
+async_utime = aiofiles.os.wrap(os.utime)
 
 
 def parse_login_form(html):
@@ -79,7 +85,7 @@ class AiohttpClient(HTTPClient):
     async def retrieve(self, uid: str, url: str, overwrite_created: Optional[datetime] = None, expected_size: Optional[int] = None) -> "AiohttpDownload":
         if uid in self.download_cache:
             download = self.download_cache[uid]
-            assert download.url == url
+            assert download.url == URL(url)
             assert download.total_length is None or download.total_length == expected_size
             assert download.last_modified is None or download.last_modified == overwrite_created
             return download
@@ -162,6 +168,7 @@ class AiohttpDownload(Download):
             assert self.future is not None and not self.future.done()
             return True
         else:
+            assert self.state in [DownloadState.EMPTY, DownloadState.DONE, DownloadState.FAILED]
             assert self.future is None or self.future.done()
             return False
 
@@ -169,46 +176,58 @@ class AiohttpDownload(Download):
     def is_completed(self) -> bool:
         return self.state == DownloadState.DONE
 
-    async def aclose(self):
-        pass
+    async def aclose(self, exc_type=None, exc_val=None, exc_tb=None):
+        if self.future:
+            await self.future
+        assert not self.is_loading
+
+    @asynccontextmanager
+    async def state_manager(self):
+        assert not self.is_loading and not self.is_completed
+        self.state = DownloadState.VALIDATING
+        try:
+            yield
+        finally:
+            if self.state != DownloadState.DONE:
+                self.state = DownloadState.FAILED
+
+    async def run_in_background(self, stack, aiofile, resp):
+        async with stack:
+            self.state = DownloadState.LOADING
+            async for data in resp.content.iter_any():
+                await aiofile.write(data)
+            timestamp = time.mktime(self.last_modified.timetuple())
+            await async_utime(self.local_path, (timestamp, timestamp))
+            self.state = DownloadState.DONE
 
     async def start_loading(self):
-        if not self.is_loading and not self.is_completed:
-            self.state = DownloadState.VALIDATING
+        if self.is_loading:
+            return
+        if self.is_completed:
+            assert await self.is_cached_locally(), "Cache file %s is gone." % self.local_path
+            return
+
+        await self.aclose()  # ensure old Future was properly awaited first
+        async with AsyncExitStack() as stack:
+            await stack.enter_async_context(self.state_manager())
+
             if await self.is_cached_locally():
                 self.state = DownloadState.DONE
                 return
-            # await self.validate_headers()
+            await self.validate_headers()
 
-            async with AsyncExitStack() as stack:
-                later_stack = stack
+            aiofile = await stack.enter_async_context(aiofiles.open(self.local_path, "wb", buffering=0))
+            await aiofile.truncate(self.total_length)
+            await aiofile.seek(0, os.SEEK_SET)
 
-                async def finalize(extype, exvalue, extraceback):
-                    assert self.is_loading
-                    if extype:
-                        self.state = DownloadState.FAILED
-                    else:
-                        self.state = DownloadState.DONE
-                    return False  # propagate
+            resp = await stack.enter_async_context(self.http_session.get(self.url, chunked=True))
+            resp.raise_for_status()
 
-                stack.push(finalize)
-
-                aiofile = await stack.enter_async_context(aiofiles.open(self.local_path, "wb", buffering=0))
-                await aiofile.truncate(self.total_length)
-                await aiofile.seek(0, os.SEEK_SET)
-
-                resp = await stack.enter_async_context(self.http_session.get(self.url, chunked=True))
-                resp.raise_for_status()
-
-                async def run():
-                    # FIXME awaiting this doesnt work
-                    async with later_stack:
-                        self.state = DownloadState.LOADING
-                        async for data in resp.content.iter_any():
-                            await aiofile.write(data)
-
-                self.future = asyncio.ensure_future(run(), loop=self.loop)
-                later_stack = stack.pop_all()  # don't call aexit now, but later
+            self.future = asyncio.ensure_future(
+                self.run_in_background(stack.pop_all(), aiofile, resp),
+                # After stack.pop_all(), the former exit stack will be contained in the self.future/run_in_background() 'closure'
+                # and reliably cleaned up by self.aclose() right after the background Task completed.
+                loop=self.loop)
 
     async def await_readable(self, offset=0, length=-1):
         if self.future:
@@ -216,7 +235,7 @@ class AiohttpDownload(Download):
 
     async def is_cached_locally(self):
         try:
-            stat = await self.loop.run_in_executor(None, os.stat, self.local_path)
+            stat = await async_stat(self.local_path)
             assert S_ISREG(stat.st_mode), \
                 "Was told to load Stud.IP file from irregular local file %s (%s)" % (self.local_path, stat)
             if self.total_length:
@@ -234,6 +253,10 @@ class AiohttpDownload(Download):
 
     async def validate_headers(self):
         async with self.http_session.head(self.url) as r:
+            if r.status == 405:
+                # FIXME head and options are not available for API URLs
+                log.warning("Server doesn't allow HEAD requests for Download URLs.")
+                return
             r.raise_for_status()
             accept_ranges = r.headers.get("Accept-Ranges", "")
             if accept_ranges != "bytes":
