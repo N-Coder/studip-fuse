@@ -5,6 +5,7 @@ from typing import Any, AsyncContextManager, AsyncGenerator, Callable, Coroutine
 
 import attr
 from pyrsistent import pmap as FrozenDict
+from yarl import URL
 
 T = TypeVar('T')
 
@@ -54,7 +55,7 @@ class HTTPClient(AsyncContextManager, ABC):
         pass
 
     @abstractmethod
-    async def retrieve(self, uid: str, url: str, overwrite_created: Optional[datetime] = None, expected_size: Optional[int] = None) -> "Download":
+    async def retrieve(self, uid: str, url: Union[str, URL], overwrite_created: Optional[datetime] = None, expected_size: Optional[int] = None) -> "Download":
         # TODO should id be the file revision id or the (unchangeable) id of the file
         pass
 
@@ -62,10 +63,10 @@ class HTTPClient(AsyncContextManager, ABC):
 @attr.s()
 class Download(ABC):
     uid = attr.ib()  # type: str
-    url = attr.ib()  # type: str
+    url = attr.ib(converter=URL)  # type: URL
     local_path = attr.ib()  # type: str
     total_length = attr.ib()  # type: int
-    last_modified = attr.ib()  # type: int
+    last_modified = attr.ib()  # type: datetime
 
     @property
     @abstractmethod

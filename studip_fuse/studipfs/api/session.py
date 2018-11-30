@@ -1,6 +1,7 @@
 import logging
 import re
 import warnings
+from datetime import datetime
 from typing import AsyncGenerator, List, Mapping, Tuple
 
 import attr
@@ -190,6 +191,6 @@ class StudIPSession(object):
         return await self.http.retrieve(
             uid=file["id"],  # TODO should uid be the file revision id or the (unchangeable) id of the file
             url=self.studip_url("file/%s/download" % file["id"]),  # this requires "id", not "file_id"
-            overwrite_created=file["chdate"],  # TODO or file["mkdate"] # TODO datetime.fromtimestamp(...) here?
-            expected_size=file["size"]
+            overwrite_created=datetime.fromtimestamp(int(file["chdate"])),  # TODO or file["mkdate"]
+            expected_size=int(file["size"])
         )

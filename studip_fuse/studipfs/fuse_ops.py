@@ -191,8 +191,7 @@ class FUSEView(object):
             raise FuseOSError(errno.EISDIR)
         else:
             download = self.loop_run_fn(resolved_real_file.open_file, flags)  # type: Download
-            self.loop_run_fn(download.start_loading)  # TODO when / how to start?
-            self.loop_run_fn(download.await_readable)
+            self.loop_run_fn(download.start_loading)
             if os.name == 'nt' and not flags & getattr(os, "O_TEXT", 16384):
                 flags |= os.O_BINARY
             fileno = os.open(download.local_path, flags)
