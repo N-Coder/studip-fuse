@@ -123,6 +123,13 @@ class VirtualPath(object):
 
     # FS-API  ##########################################################################################################
 
+    @classmethod
+    def with_middleware(cls, list_contents_annotation, open_file_annotation, name="GenericMiddlewareStudIPPath"):
+        return type(name, (cls,), {
+            "list_contents": list_contents_annotation(cls.list_contents),
+            "open_file": open_file_annotation(cls.open_file),
+        })
+
     async def access(self, mode):
         pass
 

@@ -32,7 +32,15 @@ HTTPResponse = NamedTuple("HTTPResponse", [
 
 
 class HTTPClient(AsyncContextManager, ABC):
-    # TODO add middleware
+    @classmethod
+    def with_middleware(cls, get_json_annotation, auth_annotation, download_annotation, name="GenericMiddlewareHTTPClient"):
+        return type(name, (cls,), {
+            "get_json": get_json_annotation(cls.get_json),
+            "basic_auth": auth_annotation(cls.basic_auth),
+            "oauth2_auth": auth_annotation(cls.oauth2_auth),
+            "shib_auth": auth_annotation(cls.shib_auth),
+            "retrieve": download_annotation(cls.retrieve),
+        })
 
     @abstractmethod
     async def get_json(self, url) -> FrozenDict:

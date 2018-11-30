@@ -8,7 +8,7 @@ from asyncio import Future
 from contextlib import AsyncExitStack
 from datetime import datetime
 from stat import S_ISREG
-from typing import Callable, Dict, Optional, Union
+from typing import Callable, Union
 
 import aiofiles
 import aiofiles.os
@@ -16,11 +16,11 @@ import aiohttp
 import attr
 from async_generator import asynccontextmanager
 from async_lru import alru_cache
-from bs4 import BeautifulSoup
 from pyrsistent import freeze
 from yarl import URL
 
-from studip_fuse.studipfs.api.aiointerface import Download, HTTPClient, HTTPResponse
+from studip_fuse.studipfs.api.aiobase import BaseHTTPClient
+from studip_fuse.studipfs.api.aiointerface import Download, HTTPResponse
 
 log = logging.getLogger(__name__)
 
@@ -28,36 +28,9 @@ async_stat = aiofiles.os.stat
 async_utime = aiofiles.os.wrap(os.utime)
 
 
-def parse_login_form(html):
-    soup = BeautifulSoup(html, 'lxml')
-    for form in soup.find_all('form'):
-        if 'action' in form.attrs:
-            return form.attrs['action']
-    raise PermissionError("Could not find login form", soup)
-
-
-def parse_saml_form(html):
-    soup = BeautifulSoup(html, 'lxml')
-    saml_fields = {'RelayState', 'SAMLResponse'}
-    form_data = {}
-    form_url = None
-    p = soup.find('p')
-    if 'class' in p.attrs and 'form-error' in p.attrs['class']:
-        raise PermissionError("Error in Request: '%s'" % p.text, soup)
-    for input in soup.find_all('input'):
-        if 'name' in input.attrs and 'value' in input.attrs and input.attrs['name'] in saml_fields:
-            form_data[input.attrs['name']] = input.attrs['value']
-            form_url = input.find_parent("form").attrs['action']
-
-    return form_url, form_data
-
-
 @attr.s()
-class AiohttpClient(HTTPClient):
+class AiohttpClient(BaseHTTPClient):
     http_session = attr.ib()  # type: Union[aiohttp.ClientSession, Callable[[],aiohttp.ClientSession]]
-    storage_dir = attr.ib()  # type: str
-
-    download_cache = attr.ib(init=False, default=attr.Factory(dict))  # type: Dict[str, "AiohttpDownload"]
     exit_stack = attr.ib(init=False, default=attr.Factory(AsyncExitStack))  # type: AsyncExitStack
 
     @property
@@ -79,21 +52,10 @@ class AiohttpClient(HTTPClient):
             resp.raise_for_status()
             return freeze(await resp.json())
 
-    def uid_to_path(self, uid):
-        return os.path.join(self.storage_dir, uid)
-
-    async def retrieve(self, uid: str, url: str, overwrite_created: Optional[datetime] = None, expected_size: Optional[int] = None) -> "AiohttpDownload":
-        if uid in self.download_cache:
-            download = self.download_cache[uid]
-            assert download.url == URL(url)
-            assert download.total_length is None or download.total_length == expected_size
-            assert download.last_modified is None or download.last_modified == overwrite_created
-            return download
-        else:
-            download = AiohttpDownload(uid, url, self.uid_to_path(uid), expected_size, overwrite_created, self)
-            self.exit_stack.push_async_exit(download.aclose)
-            self.download_cache[uid] = download
-            return download
+    async def retrieve_missing(self, uid, url, overwrite_created, expected_size):
+        download = AiohttpDownload(uid, url, self.uid_to_path(uid), expected_size, overwrite_created, self)
+        self.exit_stack.push_async_exit(download.aclose)
+        return download
 
     async def basic_auth(self, url, username, password) -> HTTPResponse:
         self.http_session._default_auth = aiohttp.BasicAuth(username, password)
@@ -110,7 +72,7 @@ class AiohttpClient(HTTPClient):
     async def shib_auth(self, start_url, username, password) -> HTTPResponse:
         async with self.http_session.get(start_url) as resp:
             resp.raise_for_status()
-            post_url = parse_login_form(await resp.text())
+            post_url = self.parse_login_form(await resp.text())
             post_url = URL(resp.url).join(URL(post_url))
 
         async with self.http_session.post(
@@ -124,7 +86,7 @@ class AiohttpClient(HTTPClient):
                     "_shib_idp_revokeConsent": "false"
                 }) as resp:
             resp.raise_for_status()
-            form_url, form_data = parse_saml_form(await resp.text())
+            form_url, form_data = self.parse_saml_form(await resp.text())
             form_url = URL(resp.url).join(URL(form_url))
 
         async with self.http_session.post(form_url, data=form_data) as resp:
