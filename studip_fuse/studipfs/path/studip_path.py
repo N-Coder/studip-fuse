@@ -188,7 +188,8 @@ class StudIPPath(VirtualPath):
     async def getxattr(self):
         xattrs = dict(self.known_tokens)
         if self.is_folder:
-            # TODO "user.studip-fuse.contents-status" / "user.studip-fuse.contents-exception" is cached by CachingRealPath
+            # list_contents is not cached, so we don't know here whether that information is available
+            # see studip_fuse.launcher.aioimpl.asyncio.alru_realpath.CachingRealPath for an implementation
             pass
         else:
             try:
