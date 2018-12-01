@@ -1,3 +1,4 @@
+import errno
 import logging
 import os
 import re
@@ -13,6 +14,7 @@ from cached_property import cached_property
 
 from studip_fuse.avfs.path_util import join_path, path_head, path_name
 from studip_fuse.avfs.virtual_path import FormatToken, VirtualPath, get_format_str_fields
+from studip_fuse.launcher.fuse import FuseOSError
 from studip_fuse.studipfs.api.aiointerface import Download, Pipeline
 from studip_fuse.studipfs.api.session import StudIPSession
 from studip_fuse.studipfs.path.encoding import Charset, EscapeMode, escape_file_name
@@ -161,12 +163,15 @@ class StudIPPath(VirtualPath):
                     new_known_data={**item, Folder: subfolder},
                     increment_path_segments=False))
 
+    async def access(self, mode):
+        if self._file and not (self._file.get("is_downloadable", True) and self._file.get("is_readable", True)):
+            raise FuseOSError(errno.EACCES)
+        await super(StudIPPath, self).access(mode)
+
     async def getattr(self):
         d = dict(st_ino=hash(self.partial_path), st_nlink=1,
                  st_mode=S_IFDIR if self.is_folder else S_IFREG)
-        # TODO update; is_readable vs is_downloadable for files / folders?
-        # FIXME file doesn't carry information on accessibility
-        if self.is_folder or self._file["is_downloadable"]:
+        if self.is_folder or (self._file.get("is_downloadable", True) and self._file.get("is_readable", True)):
             d["st_mode"] |= S_IRUSR | S_IRGRP | S_IROTH
         if hasattr(os, "getuid"):
             d["st_uid"] = os.getuid()
@@ -200,6 +205,7 @@ class StudIPPath(VirtualPath):
         return xattrs
 
     async def open_file(self, flags) -> Download:
+        await self.access(flags)
         assert not self.is_folder, "open_file called on folder %s" % self
         return await self.session.retrieve_file(self._file)
 
@@ -303,12 +309,12 @@ class StudIPPath(VirtualPath):
                 visited_folders.append(vp._folder)
                 path = [vp._folder["name"]] + path
 
-                is_ghost_folder = vp._folder.get("folder_type", None) in ["RootFolder"]  # FIXME use correct folder types
+                is_ghost_folder = vp._folder.get("folder_type", None) in ["RootFolder"]
                 guess_ghost_folder = vp._folder["name"] in ["Allgemeiner Dateiordner", "Hauptordner", self._course["title"] if self._course else None]
-                if is_ghost_folder != guess_ghost_folder:
+                if is_ghost_folder != guess_ghost_folder and vp._folder.get("folder_type", None) not in ["StandardFolder", "PermissionEnabledFolder"]:
                     warnings.warn("Folder has name %s indicating a ghost folder, but type is %s: %s" % (
                         vp._folder["name"], vp._folder["folder_type"], vp._folder))
-                if not is_ghost_folder:
+                if not (is_ghost_folder or guess_ghost_folder):
                     short_path = [vp._folder["name"]] + short_path
 
             assert vp is not vp.parent
@@ -358,3 +364,9 @@ class StudIPPath(VirtualPath):
             return tuple(datetime.fromtimestamp(int(val)) for val in vals)
         else:
             return None, None
+
+    def known_data_str(self, key: DataField, value):
+        if key == DataField.Course:
+            return "%s(%s %s %s)" % (key, value["number"], value["type"], value["title"])
+        else:
+            return "%s(%s)" % (key, getattr(value, "title", getattr(value, "name", getattr(value, "id", "?"))))

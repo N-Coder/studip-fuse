@@ -2,6 +2,7 @@ import asyncio
 import concurrent.futures
 import inspect
 import logging
+import warnings
 from asyncio import AbstractEventLoop
 from concurrent.futures import CancelledError
 from contextlib import AsyncExitStack, ExitStack, contextmanager
@@ -35,7 +36,7 @@ def setup_asyncio_loop(args):
                 assert not inspect.iscoroutine(corofn)
                 assert inspect.iscoroutinefunction(corofn)
                 if not loop.is_running():
-                    log.warning("Submitting coroutinefunction %s to paused main asyncio loop %s, this shouldn't happen",
+                    warnings.warn("Submitting coroutinefunction %s to paused main asyncio loop %s, this shouldn't happen",
                                 corofn, loop)
                 return asyncio.run_coroutine_threadsafe(corofn(*args, **kwargs), loop).result()
 

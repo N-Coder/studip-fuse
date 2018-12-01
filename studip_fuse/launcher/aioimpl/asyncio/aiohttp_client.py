@@ -4,6 +4,7 @@ import logging
 import os
 import re
 import time
+import warnings
 from asyncio import Future
 from contextlib import AsyncExitStack
 from datetime import datetime
@@ -140,6 +141,9 @@ class AiohttpDownload(Download):
 
     async def aclose(self, exc_type=None, exc_val=None, exc_tb=None):
         if self.future:
+            if self.future.exception():
+                # don't await a failed future multiple times, this will mess up the stack trace
+                raise RuntimeError("Background download failed: %s" % self.future) from self.future.exception()
             await self.future
         assert not self.is_loading
 
@@ -158,6 +162,8 @@ class AiohttpDownload(Download):
             self.state = DownloadState.LOADING
             async for data in resp.content.iter_any():
                 await aiofile.write(data)
+            position = await aiofile.tell()
+            assert position == self.total_length, "Download %s only got %s of %s bytes" % (self, position, self.total_length)
             timestamp = time.mktime(self.last_modified.timetuple())
             await async_utime(self.local_path, (timestamp, timestamp))
             self.state = DownloadState.DONE
@@ -192,8 +198,7 @@ class AiohttpDownload(Download):
                 loop=self.loop)
 
     async def await_readable(self, offset=0, length=-1):
-        if self.future:
-            await self.future
+        await self.aclose()  # TODO would be sufficient to only wait for requested range
 
     async def is_cached_locally(self):
         try:
@@ -216,8 +221,7 @@ class AiohttpDownload(Download):
     async def validate_headers(self):
         async with self.http_session.head(self.url) as r:
             if r.status == 405:
-                # FIXME head and options are not available for API URLs
-                log.warning("Server doesn't allow HEAD requests for Download URLs.")
+                warnings.warn("Server doesn't allow HEAD requests for Download URLs.")
                 return
             r.raise_for_status()
             accept_ranges = r.headers.get("Accept-Ranges", "")

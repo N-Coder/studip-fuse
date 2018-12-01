@@ -55,8 +55,6 @@ class VirtualPath(object):
                     offending_tokens.append((key, "'%s'" % parent_value, "'%s'" % child_value, "(child values can only grow if segment_needs_expand_loop is True)"))
                 elif not child_value.startswith(parent_value):
                     offending_tokens.append((key, "'%s'" % parent_value, "'%s'" % child_value, "(child value is not an expansion of the parent value)"))
-                elif any(key in segment for segment in self.path_segments):
-                    offending_tokens.append((key, "'%s'" % parent_value, "'%s'" % child_value, "(already set path_segments may not change)"))
                 else:
                     continue  # expansion of non-fixed child value is allowed in expand loop
             if offending_tokens:
@@ -194,9 +192,12 @@ class VirtualPath(object):
                     path_segments.append(seg)
 
         details.append("[%s]->[%s]" % (
-            ",".join(str(v) for v in self.known_data.keys()),
+            ",".join(self.known_data_str(k, v) for k, v in self.known_data.items()),
             ",".join(str(v) for v in self.content_options)))
         return "[%s](%s)" % (
             "/".join(filter(bool, path_segments)),
             ",".join(filter(bool, details))
         )
+
+    def known_data_str(self, key: DataField, value):
+        return "%s(%s)" % (key, getattr(value, "id", "?"))
