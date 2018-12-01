@@ -87,6 +87,10 @@ class Download(ABC):
         return False
 
     @abstractmethod
+    def exception(self) -> BaseException:
+        pass
+
+    @abstractmethod
     async def start_loading(self):
         pass
 

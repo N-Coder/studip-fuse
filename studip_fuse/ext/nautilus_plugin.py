@@ -21,10 +21,10 @@ def main():
     dest_file = os.path.join(folder, "studip_fuse_nautilus_plugin.py")
     if os.path.isfile(script_file):
         print("Creating symbolic link from %s to %s..." % (script_file, dest_file))
-        if os.path.isfile(dest_file):
+        if os.path.isfile(dest_file) or os.path.islink(dest_file):
             print("Removing previous link...")
             os.remove(dest_file)
-        os.symlink(script_file, dest_file)
+        os.symlink(src=script_file, dst=dest_file)
         print("Link created.")
     else:
         print("Copying script source code to %s..." % dest_file)
@@ -55,6 +55,7 @@ else:
                 "unknown": "new",
                 "pending": "synchronizing",
                 "failed": "unreadable",
+                "unavailable": "unreadable",
                 "available": "default",
                 # TODO missing states: "stale",
             }.get(status, None)

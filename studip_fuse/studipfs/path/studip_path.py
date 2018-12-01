@@ -187,13 +187,30 @@ class StudIPPath(VirtualPath):
 
     async def getxattr(self):
         xattrs = dict(self.known_tokens)
-        # TODO missing all folder data
-        #   "author-id": self.__escape(self._folder["user_id"]),  # 'cli'
-        #   "is_visible": self.__escape(self._folder["is_visible"]),  # True
-        #   "is_readable": self.__escape(self._folder["is_readable"]),  # True
-        #   "is_writable": self.__escape(self._folder["is_writable"]),  # True
-        # TODO file doesn't carry information on accessibility
-        # TODO "user.studip-fuse.contents-status" / "user.studip-fuse.contents-exception" for folder / file get_content_task
+        if self.is_folder:
+            # TODO "user.studip-fuse.contents-status" / "user.studip-fuse.contents-exception" is cached by CachingRealPath
+            pass
+        else:
+            try:
+                download = await self.open_file()
+                if download.is_loading:
+                    xattrs["contents-status"] = "pending"
+                    xattrs["contents-exception"] = "InvalidStateError: operation is not complete yet"
+                elif download.is_completed:
+                    xattrs["contents-status"] = "available"
+                    xattrs["contents-exception"] = ""
+                elif download.exception():
+                    xattrs["contents-status"] = "failed"
+                    xattrs["contents-exception"] = download.exception()
+                else:
+                    xattrs["contents-status"] = "unknown"
+                    xattrs["contents-exception"] = "InvalidStateError: operation was not started yet"
+            except FuseOSError as e:
+                xattrs["contents-status"] = "unavailable"
+                xattrs["contents-exception"] = e
+        if isinstance(xattrs.get("contents-exception", None), BaseException):
+            exc = xattrs["contents-exception"]
+            xattrs["contents-exception"] = "%s: %s" % (type(exc).__name__, exc)
         import json
         from pyrsistent import thaw
         xattrs["json"] = json.dumps({
@@ -204,7 +221,7 @@ class StudIPPath(VirtualPath):
         })
         return xattrs
 
-    async def open_file(self, flags) -> Download:
+    async def open_file(self, flags=None) -> Download:
         await self.access(flags)
         assert not self.is_folder, "open_file called on folder %s" % self
         return await self.session.retrieve_file(self._file)
