@@ -8,10 +8,9 @@ from concurrent.futures import CancelledError
 from contextlib import AsyncExitStack, ExitStack, contextmanager
 
 import aiohttp
-from async_lru import alru_cache
 
 import studip_fuse.launcher.aioimpl.asyncio as aioimpl_asyncio
-from studip_fuse.avfs.real_path import RealPath
+from studip_fuse.launcher.aioimpl.asyncio.alru_realpath import CachingRealPath
 from studip_fuse.studipfs.api.aiointerface import HTTPClient
 from studip_fuse.studipfs.api.session import StudIPSession
 from studip_fuse.studipfs.fuse_ops import LoopSetupResult
@@ -37,7 +36,7 @@ def setup_asyncio_loop(args):
                 assert inspect.iscoroutinefunction(corofn)
                 if not loop.is_running():
                     warnings.warn("Submitting coroutinefunction %s to paused main asyncio loop %s, this shouldn't happen",
-                                corofn, loop)
+                                  corofn, loop)
                 return asyncio.run_coroutine_threadsafe(corofn(*args, **kwargs), loop).result()
 
             future.set_result(LoopSetupResult(
@@ -95,10 +94,6 @@ def loop_context(args):
         loop.run_until_complete(drain_loop_async(loop))
         loop.close()
         log.info("Event loop closed")
-
-
-cache = alru_cache(loop="loop", cls=True, cache_exceptions=False)
-CachingRealPath = RealPath.with_middleware(cache, cache)
 
 
 @contextmanager
