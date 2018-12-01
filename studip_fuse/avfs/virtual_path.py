@@ -21,7 +21,8 @@ DataField = NewType("DataField", str)
 
 def get_format_str_fields(format_segment) -> Set[Type]:
     for (literal_text, field_name, format_spec, conversion) in FORMATTER.parse(format_segment):
-        yield field_name
+        if field_name:
+            yield field_name
 
 
 @attr.s(frozen=True, str=False)
@@ -51,11 +52,11 @@ class VirtualPath(object):
                 parent_value = self.parent.known_tokens[key]
                 assert parent_value != child_value
                 if not self.segment_needs_expand_loop:
-                    offending_tokens.append((key, parent_value, child_value, "(child values can only grow if segment_needs_expand_loop is True)"))
+                    offending_tokens.append((key, "'%s'" % parent_value, "'%s'" % child_value, "(child values can only grow if segment_needs_expand_loop is True)"))
                 elif not child_value.startswith(parent_value):
-                    offending_tokens.append((key, parent_value, child_value, "(child value is not an expansion of the parent value)"))
-                elif key in self.path_segments:
-                    offending_tokens.append((key, parent_value, child_value, "(already set path_segments may not change)"))
+                    offending_tokens.append((key, "'%s'" % parent_value, "'%s'" % child_value, "(child value is not an expansion of the parent value)"))
+                elif any(key in segment for segment in self.path_segments):
+                    offending_tokens.append((key, "'%s'" % parent_value, "'%s'" % child_value, "(already set path_segments may not change)"))
                 else:
                     continue  # expansion of non-fixed child value is allowed in expand loop
             if offending_tokens:
@@ -74,12 +75,14 @@ class VirtualPath(object):
     def partial_path(self) -> str:
         partial = join_path(*self.path_segments)
         try:
-            partial = partial.format_map(self.known_tokens)
+            formatted_segments = [segment.format_map(self.known_tokens).strip() for segment in self.path_segments]
         except KeyError:
             missing_fields = set(get_format_str_fields(partial)).difference(self.known_tokens.keys())
             assert not missing_fields, "Format specification '%s' is missing fields %s in known tokens of virtual path %s" % \
                                        (partial, missing_fields, self)
             raise
+
+        partial = join_path(*formatted_segments)
         partial = normalize_path(partial)
         return partial
 

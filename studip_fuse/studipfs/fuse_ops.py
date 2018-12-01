@@ -169,8 +169,12 @@ class FUSEView(object):
             raise FuseOSError(errno.ENOENT)
         else:
             xattr = await resolved_real_file.getxattr()
+            if name.startswith("user."):
+                name = name[len("user."):]
+            if name.startswith("studip-fuse."):
+                name = name[len("studip-fuse."):]
             if name in xattr:
-                return xattr[name]
+                return str(xattr[name]).encode()
             else:
                 raise FuseOSError(ENOATTR)
 
@@ -181,7 +185,8 @@ class FUSEView(object):
             raise FuseOSError(errno.ENOENT)
         else:
             xattr = await resolved_real_file.getxattr()
-            return list(xattr.keys())
+            xattr = ["user.studip-fuse.%s" % k for k in xattr.keys()]
+            return xattr
 
     def open(self, path, flags):
         resolved_real_file: RealPath = self._resolve(path)

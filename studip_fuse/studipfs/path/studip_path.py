@@ -33,6 +33,49 @@ Folder = DataField.Folder
 File = DataField.File
 
 
+class Abbrev:
+    SEMESTER_RE = re.compile(r'^(SS|WS) (\d{2})(.(\d{2}))?')
+    WORD_SEPARATOR_RE = re.compile(r'[-. _/()]+')
+    NUMBER_RE = re.compile(r'^([0-9]+)|([IVXLCDM]+)$')
+
+    @classmethod
+    def semester_lexical_short(cls, title):
+        return cls.SEMESTER_RE.sub(r'20\2\1', title)
+
+    @classmethod
+    def semester_lexical(cls, title):
+        return cls.SEMESTER_RE.sub(r'20\2 \1 -\4', title).rstrip(" -")
+
+    @classmethod
+    def course_abbrev(cls, name):
+        words = cls.WORD_SEPARATOR_RE.split(name)
+        number = ""
+        abbrev = ""
+        if len(words) > 1 and cls.NUMBER_RE.match(words[-1]):
+            number = words[-1]
+            words = words[0:len(words) - 1]
+        if len(words) < 3:
+            abbrev = "".join(w[0: min(3, len(w))] for w in words)
+        elif len(words) >= 3:
+            abbrev = "".join(w[0] for w in words if len(w) > 0)
+        return abbrev + number
+
+    @classmethod
+    def course_type_abbrev(cls, typ):
+        # TODO use data from complete type listing
+        special_abbrevs = {
+            "Arbeitsgemeinschaft": "AG",
+            "Studien-/Arbeitsgruppe": "SG",
+        }
+        try:
+            return special_abbrevs[typ]
+        except KeyError:
+            abbrev = typ[0]
+            if typ.endswith("seminar"):
+                abbrev += "S"
+            return abbrev
+
+
 @attr.s(frozen=True, str=False, repr=False, hash=False)
 class StudIPPath(VirtualPath):
     session = attr.ib()  # type: StudIPSession
@@ -122,7 +165,8 @@ class StudIPPath(VirtualPath):
         d = dict(st_ino=hash(self.partial_path), st_nlink=1,
                  st_mode=S_IFDIR if self.is_folder else S_IFREG)
         # TODO update; is_readable vs is_downloadable for files / folders?
-        if self.is_folder or self._file.is_downloadable:
+        # FIXME file doesn't carry information on accessibility
+        if self.is_folder or self._file["is_downloadable"]:
             d["st_mode"] |= S_IRUSR | S_IRGRP | S_IROTH
         if hasattr(os, "getuid"):
             d["st_uid"] = os.getuid()
@@ -133,21 +177,27 @@ class StudIPPath(VirtualPath):
         if self.mod_times[1]:
             d["st_mtime"] = self.mod_times[1].timestamp()
         if not self.is_folder:
-            d["st_size"] = int(self._file.size)  # TODO this is a str
+            d["st_size"] = int(self._file["size"])
         return d
 
     async def getxattr(self):
-        # TODO implement based on extended known_tokens
-        # "folder-id": self.__escape(self._folder["id"]),  # '3c90ca04794bce6661f985c664a5d6cd'
-        # "folder-name": self.__escape(self._folder["name"]),  # 'Virtuelle Maschinen und Laufzeitsysteme'
-        # "folder-description": self.__escape(self._folder["description"]),  # ''
-        # "folder-type": self.__escape(self._folder["folder_type"]),  # 'RootFolder'
-        # "author-id": self.__escape(self._folder["user_id"]),  # 'cli'
-        # "is_visible": self.__escape(self._folder["is_visible"]),  # True
-        # "is_readable": self.__escape(self._folder["is_readable"]),  # True
-        # "is_writable": self.__escape(self._folder["is_writable"]),  # True
+        xattrs = dict(self.known_tokens)
+        # TODO missing all folder data
+        #   "author-id": self.__escape(self._folder["user_id"]),  # 'cli'
+        #   "is_visible": self.__escape(self._folder["is_visible"]),  # True
+        #   "is_readable": self.__escape(self._folder["is_readable"]),  # True
+        #   "is_writable": self.__escape(self._folder["is_writable"]),  # True
+        # TODO file doesn't carry information on accessibility
         # TODO "user.studip-fuse.contents-status" / "user.studip-fuse.contents-exception" for folder / file get_content_task
-        return {}
+        import json
+        from pyrsistent import thaw
+        xattrs["json"] = json.dumps({
+            "semester": thaw(self._semester),
+            "course": thaw(self._course),
+            "folder": thaw(self._folder),
+            "file": thaw(self._file)
+        })
+        return xattrs
 
     async def open_file(self, flags) -> Download:
         assert not self.is_folder, "open_file called on folder %s" % self
@@ -161,10 +211,12 @@ class StudIPPath(VirtualPath):
         if self.next_path_segments:
             format_segment = path_head(self.next_path_segments)
             for field_name in get_format_str_fields(format_segment):
+                # TODO course_class, course_type, folder_type and file_terms are well defined and can be listed without listing all courses/folders/files
+                # TODO update available field_names
                 if field_name in ["semester-id", "semester", "semester-short", "semester-lexical", "semester-lexical-short"]:
                     requirements.add(Semester)
                 elif field_name in ["course-id", "course-number", "course", "course-subtitle", "course-description",
-                                    "course-abbrev", "course-type", "course-class", "course-type-abbrev",
+                                    "course-abbrev", "course-type", "course-class", "course-type-abbrev", "course-type-short",
                                     "course-location", "course-grouping"]:
                     requirements.add(Course)
                 elif field_name in ["path", "short-path"]:
@@ -187,34 +239,47 @@ class StudIPPath(VirtualPath):
             "path": self.__escape_path(path),
             "short-path": self.__escape_path(short_path),
         }
-        # TODO add abbrev algorithms from python StudIP-API
         if self._semester:
             tokens.update({
                 "semester-id": self._semester["id"],  # '4cb8438b3057e71a627ab7e25d73ba75'
                 "semester": self.__escape(self._semester["description"]),  # 'Wintersemester 2017/2018'
                 "semester-short": self.__escape(self._semester["title"]),  # 'WS 17/18'
-                # "semester-lexical": self.__escape(self._semester.lexical),
-                # "semester-lexical-short": self.__escape(self._semester.lexical_short),
+                "semester-lexical": self.__escape(Abbrev.semester_lexical(self._semester["title"])),
+                "semester-lexical-short": self.__escape(Abbrev.semester_lexical_short(self._semester["title"])),
+
+                # 'seminars_end': 1518303599,
+                # 'begin': 1506808800,
+                # 'end': 1522533599,
+                # 'seminars_begin': 1508104800
             })
         if self._course:
-            number = re.sub("[^0-9]", "", self._course["number"])
-            type_abbrev = re.sub("[0-9]", "", self._course["number"])
+            number = re.sub("[^0-9]", "", str(self._course["number"]))
+            type_abbrev = re.sub("[0-9]", "", str(self._course["number"]))
+            type_obj = self.session.studip_course_type[self._course["type"]]
+            # map for [int(id), str(id) and name] -> {'id': 21, 'name': 'Workshop', 'class': '3'}
+            clazz_obj = self.session.studip_course_class[type_obj["class"]]
+            # map for [int(id), str(id) and name] -> {'id': 4, 'name': 'Studien-/Arbeitsgruppen', ...}
             tokens.update({
                 "course-id": self._course["course_id"],  # '00093e6878c6c7733579251567a177da'
                 "course-number": self.__escape(number),  # '5795'
                 "course": self.__escape(self._course["title"]),  # 'Virtuelle Maschinen und Laufzeitsysteme'
                 "course-subtitle": self.__escape(self._course["subtitle"]),  # ''
                 "course-description": self.__escape(self._course["description"]),  # ''
-                # "course-abbrev": self.__escape(abbrev),
-                "course-type": self.__escape(self._course["type"]),  # 'Uebung'
-                "course-class": self.__escape(self._course["class"]),  # 'Lehre'
+                "course-abbrev": self.__escape(Abbrev.course_abbrev(self._course["title"])),
                 "course-type-abbrev": self.__escape(type_abbrev),
+                "course-type": self.__escape(type_obj["name"]),  # 'Uebung'
+                "course-type-short": self.__escape(Abbrev.course_type_abbrev(type_obj["name"])),  # 'U'
+                "course-class": self.__escape(clazz_obj["name"]),  # 'Lehre'
                 "course-location": self.__escape(self._course["location"]),  # ''
-                "course-grouping": self.__escape(self._course["group"]),  # 1
+                "course-group": self.__escape(self._course["group"]),  # 1
+
+                # 'start_semester': '/studip/api.php/semester/4cb8438b3057e71a627ab7e25d73ba75',
+                # 'end_semester': '/studip/api.php/semester/4cb8438b3057e71a627ab7e25d73ba75'
             })
         if self._file:
             tokens.update({
-                "file-id": self.__escape(self._file["id"]),  # '3c90ca04794bce6661f985c664a5d6cd'
+                "file-id": self.__escape(self._file["id"]),  # '3c90ca04794bce6661f985c664a5d6cd',
+                "file-author": self.__escape(self._file["user_id"]),  # 'cli'
                 "file-name": self.__escape(self._file["name"]),  # 'Virtuelle Maschinen und Laufzeitsysteme'
                 "file-description": self.__escape(self._file["description"]),  # ''
                 "file-size": self.__escape(self._file["size"]),  # '118738',
@@ -237,10 +302,13 @@ class StudIPPath(VirtualPath):
                     assert vp._folder["id"] == visited_folders[-1]["parent_id"]
                 visited_folders.append(vp._folder)
                 path = [vp._folder["name"]] + path
-                if vp._folder.get("folder_type", None) != "RootFolder":
-                    if vp._folder["name"] in ["Allgemeiner Dateiordner", "Hauptordner", self._course["title"] if self._course else None]:
-                        warnings.warn("Folder has name %s indicating a root folder, but type is %s: %s" % (
-                            vp._folder["name"], vp._folder["folder_type"], vp._folder))
+
+                is_ghost_folder = vp._folder.get("folder_type", None) in ["RootFolder"]  # FIXME use correct folder types
+                guess_ghost_folder = vp._folder["name"] in ["Allgemeiner Dateiordner", "Hauptordner", self._course["title"] if self._course else None]
+                if is_ghost_folder != guess_ghost_folder:
+                    warnings.warn("Folder has name %s indicating a ghost folder, but type is %s: %s" % (
+                        vp._folder["name"], vp._folder["folder_type"], vp._folder))
+                if not is_ghost_folder:
                     short_path = [vp._folder["name"]] + short_path
 
             assert vp is not vp.parent
@@ -283,7 +351,7 @@ class StudIPPath(VirtualPath):
         if self._folder:
             vals = self._folder["mkdate"], self._folder["chdate"]
         if self._file:
-            vals = self._file["mkdate"], self._file["chdate"]  # TODO this is a str
+            vals = self._file["mkdate"], self._file["chdate"]
 
         if vals:
             # noinspection PyTypeChecker
