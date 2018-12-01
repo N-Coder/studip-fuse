@@ -24,10 +24,11 @@ REQUIRED_API_ENDPOINTS = [
     # "course/:course_id/files",
     "course/:course_id/top_folder",
     "folder/:folder_id",
-    # "file/:file_ref_id",
+    "file/:file_ref_id",
     # "file/:file_id/content",
     "file/:file_ref_id/download"
 ]
+ENDPOINT_REGEXES = ["^" + re.sub(":[^/]+", ".*", e) for e in REQUIRED_API_ENDPOINTS]
 
 log = logging.getLogger(__name__)
 
@@ -64,7 +65,7 @@ def studip_iter(get_next, start, max_total=None) -> AsyncGenerator[FrozenDict, N
 def append_base_url_slash(value):
     value = URL(value)
     if not value.path.endswith("/"):
-        log.warning("StudIP API %s must end with a slash. Appending '/' to make path concatenation work correctly.", repr(value))
+        warnings.warn("StudIP API %s must end with a slash. Appending '/' to make path concatenation work correctly.", repr(value))
         value = value.with_path(value.path + "/")
     return value
 
@@ -89,8 +90,8 @@ class StudIPSession(object):
     async def get_studip_json(self, url):
         url = URL(url)
         if not url.path.startswith("/") and url.path not in REQUIRED_API_ENDPOINTS:
-            if not any(url.path.startswith(endpoint) for endpoint in REQUIRED_API_ENDPOINTS):
-                log.warning("Relative path %s is not in required paths, which are checked at startup." % url)
+            if not any([re.match(p, url.path) for p in ENDPOINT_REGEXES]):
+                warnings.warn("Relative path %s is not in required paths, which are checked at startup." % url)
         return await self.http.get_json(self.studip_url(url))
 
     @classmethod
