@@ -5,7 +5,7 @@ import os
 import re
 import time
 import warnings
-from asyncio import Future
+from asyncio import CancelledError, Future
 from contextlib import AsyncExitStack
 from datetime import datetime
 from stat import S_ISREG
@@ -137,11 +137,27 @@ class AiohttpDownload(Download):
 
     @property
     def is_completed(self) -> bool:
-        return self.state == DownloadState.DONE
+        if self.state == DownloadState.DONE:
+            assert not self.exception()
+            return True
+        else:
+            return False
+
+    def exception(self):
+        if self.future and self.future.done():
+            try:
+                exc = self.future.exception()
+            except CancelledError as e:
+                exc = e
+            if exc:
+                assert self.state == DownloadState.FAILED
+            else:
+                assert self.state == DownloadState.DONE
+            return exc
 
     async def aclose(self, exc_type=None, exc_val=None, exc_tb=None):
         if self.future:
-            if self.future.exception():
+            if self.future.done() and self.future.exception():
                 # don't await a failed future multiple times, this will mess up the stack trace
                 raise RuntimeError("Background download failed: %s" % self.future) from self.future.exception()
             await self.future
