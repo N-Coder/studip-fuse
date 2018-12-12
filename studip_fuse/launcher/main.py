@@ -1,10 +1,11 @@
 import logging
 import logging.config
 import os
+import platform
 
 import studip_fuse.launcher.aioimpl.asyncio as aioimpl_asyncio
-from studip_fuse.launcher.cmd_util import parse_args
-from studip_fuse.launcher.fuse import FUSE, fuse_get_context
+from studip_fuse.launcher.cmd_util import get_version, parse_args
+from studip_fuse.launcher.fuse import FUSE, fuse_get_context, get_fuse_version, get_fuse_libfile
 from studip_fuse.launcher.log_utils import configure_logging
 from studip_fuse.studipfs.fuse_ops import FUSEView, log_status
 
@@ -17,7 +18,7 @@ def main():
             logging.root.setLevel(logging.INFO)
         if not args.debug_aio:
             logging.getLogger("asyncio").setLevel(logging.WARNING)
-        logging.debug("Program started")
+        logging.debug("Logging started")
 
         os.makedirs(args.cache, exist_ok=True)
 
@@ -40,7 +41,10 @@ def main():
         args.get_password = lambda: password  # wrap in lambda to prevent printing
 
         log_status("STARTING", args=args, level=logging.DEBUG)
-        logging.debug("Starting FUSE driver to mount at %s (uid=%s, gid=%s, pid=%s, python pid=%s)", args.mount,
+        logging.info("Starting %s with FUSE %s (%s) running via %s %s on %s"
+                     % (get_version(), get_fuse_version(), get_fuse_libfile(),
+                        platform.python_implementation(), platform.python_version(), platform.platform()))
+        logging.debug("Going to mount at %s (uid=%s, gid=%s, pid=%s, python pid=%s)", args.mount,
                       *fuse_get_context(), os.getpid())
         # This calls fork if args.foreground == False (https://bugs.python.org/issue21998)
         FUSE(fuse_ops, args.mount, debug=fuse_args.pop("debug_fuse"), **fuse_args)

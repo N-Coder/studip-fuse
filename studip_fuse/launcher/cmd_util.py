@@ -6,9 +6,10 @@ import appdirs
 from more_itertools import flatten
 from yarl import URL
 
+from studip_fuse import __author__ as prog_author, __version__ as prog_version
+
 
 def parse_args():
-    from studip_fuse import __version__ as prog_version, __author__ as prog_author
     dirs = appdirs.AppDirs("Stud.IP-Fuse", prog_author)
 
     opts_parser = argparse.ArgumentParser(add_help=False)
@@ -95,3 +96,22 @@ def StoreNameValuePair(option_parser):
                 logging.debug("Ignoring arguments %s" % ", ".join(ignored_values))
 
     return anonymous_class
+
+
+def get_version():
+    import pkg_resources
+    import subprocess
+    import inspect
+
+    pkg_data = pkg_resources.require("studip_fuse")[0]
+    try:
+        git_rev = subprocess.check_output(
+            ["git", "describe", "--always"],
+            cwd=os.path.dirname(inspect.getfile(inspect.currentframe()))
+        ).decode('ascii').strip()
+    except NotADirectoryError:
+        git_rev = "release"
+    if prog_version == pkg_data.version:
+        return "{} {} {}".format(pkg_data.project_name.title(), prog_version, git_rev)
+    else:
+        return "{} {} (installed as {}) {}".format(pkg_data.project_name.title(), prog_version, pkg_data.version, git_rev)
