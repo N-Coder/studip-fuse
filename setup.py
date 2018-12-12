@@ -23,7 +23,7 @@ if __name__ == "__main__":
             'studip_fuse': ['launcher/logging.yaml'],
         },
         install_requires=[
-            "fusepy",  # FIXME newest version
+            # "fusepy", # now included here
 
             # Launcher Requirements
             "argparse",
@@ -32,22 +32,20 @@ if __name__ == "__main__":
 
             # AsyncIO Requirements
             "asyncio",
-            "async-timeout",
-            "async_generator",
-            "aiofiles",
             "aiohttp",
-
-            # Failsafe / Caching Requirements
-            "pyfailsafe",
-            "aiocache",
+            "aiofiles",
+            "async-generator",
+            "async-lru",
 
             # Utils
             "attrs",
-            "cattrs",
             "cached_property",
             "more_itertools",
             "pyrsistent",
             "tabulate",
+            "beautifulsoup4",
+            "lxml",
+            "yarl",
         ],
         entry_points={
             "console_scripts": [
