@@ -127,6 +127,7 @@ class StudIPSession(object):
             self.studip_course_type[int(key)] = value
             self.studip_course_type[str(key)] = value
             self.studip_course_type[str(value["name"])] = value
+            # FIXME Seminar is Community, not Lehre
         self.studip_course_type = freeze(self.studip_course_type)
 
         self.studip_course_class = {}

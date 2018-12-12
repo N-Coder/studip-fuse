@@ -52,6 +52,7 @@ def configure_logging():
         with open(logging_path, "rb") as f:
             logging_config = yaml.load(f)
     else:
+        # will only work if studip_fuse.launcher has an __init__.py file
         logging_config = yaml.load(pkg_resources.resource_string("studip_fuse.launcher", "logging.yaml"))
 
     if "handlers" in logging_config:
