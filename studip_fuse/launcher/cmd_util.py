@@ -22,6 +22,8 @@ def parse_args():
     studip_opts.add_argument("--format", help="format specifier for virtual paths",
                              default="{semester}/{course}/{course-type}/{short-path}/{file-name}")
     studip_opts.add_argument("--cache", help="path to cache directory", default=dirs.user_cache_dir)
+    studip_opts.add_argument("--login-method", help="method for logging in to Stud.IP session", default="shib",
+                             choices=['shib', 'oauth', 'basic'])
     studip_opts.add_argument("--studip", help="Stud.IP API URL", type=URL,
                              default="https://studip.uni-passau.de/studip/api.php/")
     studip_opts.add_argument("--sso", help="Studi.IP SSO URL", type=URL,
