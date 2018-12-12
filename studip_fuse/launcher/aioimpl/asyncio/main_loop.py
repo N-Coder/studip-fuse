@@ -109,7 +109,12 @@ def session_context(args, loop, future: concurrent.futures.Future, ioimpl=aioimp
         check_cancelled(future)
 
         log.info("Logging in...")
-        await http_client.shib_auth(start_url=args.sso, username=args.user, password=args.get_password())
+        if args.login_method == "shib":
+            await http_client.shib_auth(start_url=args.sso, username=args.user, password=args.get_password())
+        elif args.login_method == "oauth":
+            await http_client.oauth2_auth(args)
+        else:  # if args.login_method == "basic":
+            await http_client.basic_auth(url=session.studip_url("user"), username=args.user, password=args.get_password())
         await session.check_login(username=args.user)
 
         root_vp = vpathimpl(parent=None, path_segments=[], known_data={}, next_path_segments=args.format.split("/"),
