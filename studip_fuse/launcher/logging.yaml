@@ -38,24 +38,6 @@ handlers:
     formatter: console
 
 loggers:
-  studip_fuse.async_cache:
-    level: INFO
-
-  studip_fuse.cache.circuit_breaker:
-    level: INFO
-
-  studip_api.async_delay:
-    level: INFO
-
-  studip_fuse.real_path.resolve:
-    level: INFO
-
-  studip_api.Download.progress:
-    level: INFO
-
-  studip_api.model:
-    level: INFO
-
   studip_fuse.status:
     handlers: [status]
     propagate: False
@@ -66,13 +48,6 @@ loggers:
 
   studip_fuse.stderr:
     handlers: [syslog, file]
-    propagate: False
-
-  # fuse-debug prints C stderr, so print output from log-mixin to same stream
-  # and don't send too long messages to syslog
-  studip_fuse.fs_driver.ops:
-    level: INFO
-    handlers: [console-err]
     propagate: False
 
 root:
