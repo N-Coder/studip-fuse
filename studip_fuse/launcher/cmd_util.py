@@ -20,7 +20,7 @@ def parse_args():
     studip_opts.add_argument("--pwfile", help="path to password file or '-' to read from stdin",
                              default=os.path.join(dirs.user_config_dir, ".studip-pw"))
     studip_opts.add_argument("--format", help="format specifier for virtual paths",
-                             default="{semester}/{course}/{course-type}/{short-path}/{file-name}")
+                             default="{semester-lexical}/{course-class}/{course}/{course-type}/{short-path}/{file-name}")
     studip_opts.add_argument("--cache", help="path to cache directory", default=dirs.user_cache_dir)
     studip_opts.add_argument("--login-method", help="method for logging in to Stud.IP session", default="shib",
                              choices=['shib', 'oauth', 'basic'])
@@ -31,7 +31,7 @@ def parse_args():
 
     fuse_opts = opts_parser.add_argument_group("FUSE Options")
     fuse_opts.add_argument("-f", "--foreground", help="run in foreground", action="store_true")
-    fuse_opts.add_argument("--nothreads", help="single threads for FUSE", action="store_true")
+    fuse_opts.add_argument("-s", "--nothreads", help="single threads for FUSE", action="store_true")
     fuse_opts.add_argument("--allow-other", help="allow access by all users", action="store_true")
     fuse_opts.add_argument("--allow-root", help="allow access by root", action="store_true")
     fuse_opts.add_argument("--nonempty", help="allow mounts over non-empty file/dir", action="store_true")
