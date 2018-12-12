@@ -43,7 +43,7 @@ else:
     import gi
 
     gi.require_version('Nautilus', '3.0')
-    from gi.repository import Nautilus, GObject, Gio
+    from gi.repository import Nautilus, GObject, Gio, Gtk, Gdk
 
 
     class InfoProvider(GObject.GObject, Nautilus.InfoProvider):
@@ -62,6 +62,26 @@ else:
             # TODO mark as unreadable if offline, update emblems on change
             if emblem:
                 file.add_emblem(emblem)
+
+
+    class MenuProvider(GObject.GObject, Nautilus.MenuProvider):
+        def menu_activate_cb(self, menu, url):
+            Gtk.show_uri(None, url, Gdk.CURRENT_TIME)
+
+        def get_file_items(self, window, files):
+            if len(files) == 1:
+                gfile = files[0].get_location()
+                xattr_info = gfile.query_info("xattr::*", Gio.FileQueryInfoFlags.NONE, None)
+                url = xattr_info.get_attribute_string("xattr::studip-fuse.url")
+                if url:
+                    item = Nautilus.MenuItem(name='StudipFuseMenuProvider::OpenWeb',
+                                             label='Open on Stud.IP',
+                                             tip='Opens your browser on the Stud.IP page providing information on this file.',
+                                             icon='')
+                    item.connect('activate', self.menu_activate_cb, url)
+                    return item,
+
+            return None
 
 # TODO add appindicator and notifications, error reporting
 # http://candidtim.github.io/appindicator/2014/09/13/ubuntu-appindicator-step-by-step.html

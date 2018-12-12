@@ -214,6 +214,18 @@ class StudIPPath(VirtualPath):
             xattrs["contents-exception"] = "%s: %s" % (type(exc).__name__, exc)
         import json
         from pyrsistent import thaw
+        url = "/studip/dispatch.php/"
+        if self._file:
+            url += "file/details/%s?cid=%s" % (self._file["id"], self._course["course_id"])
+        elif self._folder:
+            url += "course/files/index/%s?cid=%s" % (self._folder["id"], self._course["course_id"])
+        elif self._course:
+            url += "course/files?cid=%s" % (self._course["course_id"])
+        elif self._semester:
+            url += "my_courses/set_semester?sem_select=%s" % (self._semester["id"])
+        else:
+            url += "my_courses"
+        xattrs["url"] = self.session.studip_url(url)
         xattrs["json"] = json.dumps({
             "semester": thaw(self._semester),
             "course": thaw(self._course),
