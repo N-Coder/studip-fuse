@@ -98,7 +98,7 @@ def loop_context(args):
 
 @contextmanager
 def session_context(args, loop, future: concurrent.futures.Future, ioimpl=aioimpl_asyncio,
-                    vpathimpl=StudIPPath, rpathimpl=CachingRealPath):
+                    vpathimpl=StudIPPath, rpathimpl=CachingRealPath):  # TODO allow selecting all these classes
     stack = AsyncExitStack()
 
     async def enter():
