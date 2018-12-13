@@ -108,7 +108,7 @@ def session_context(args, loop, future: concurrent.futures.Future, ioimpl=aioimp
         session = StudIPSession(studip_base=args.studip, http=http_client)
         check_cancelled(future)
 
-        log.info("Logging in...")
+        log.info("Logging in via %s...", args.login_method)
         if args.login_method == "shib":
             await http_client.shib_auth(start_url=args.sso, username=args.user, password=args.get_password())
         elif args.login_method == "oauth":

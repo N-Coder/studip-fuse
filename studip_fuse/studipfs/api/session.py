@@ -6,6 +6,7 @@ from typing import AsyncGenerator, List, Mapping, Tuple
 
 import attr
 from async_generator import async_generator, yield_
+from more_itertools import one
 from pyrsistent import freeze, pvector as FrozenList
 from yarl import URL
 
@@ -144,6 +145,16 @@ class StudIPSession(object):
         self.studip_file_tou = freeze(self.studip_file_tou)
 
         self.studip_folder_types = await self.get_studip_json("studip/file_system/folder_types")
+
+        log.info("Logged in as %s on %s Stud.IP Version %s running at %s",
+                 username, settings["UNI_NAME_CLEAN"], await self.get_version(), self.studip_base)
+
+    async def get_version(self):
+        # FIXME can't get version from REST API in JSON
+        async with self.http.http_session.get(self.studip_url("/studip/dispatch.php/siteinfo/")) as resp:
+            from bs4 import BeautifulSoup
+            soup = BeautifulSoup(await resp.text(), 'lxml')
+            return str(one(soup.find_all(string="Version:")).parent.next_sibling).strip()
 
     async def get_user(self) -> FrozenDict:
         return await self.get_studip_json("user")
