@@ -25,7 +25,7 @@ class Pipeline(ABC, Generic[T]):
 
 
 HTTPResponse = NamedTuple("HTTPResponse", [
-    ("url", str),
+    ("url", URL),
     ("headers", Dict[str, str]),
     ("content", Union[str, Dict]),
 ])

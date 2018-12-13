@@ -76,7 +76,7 @@ class FUSEView(object):
     loop_run_fn = attr.ib(init=False, default=None)
     root_rp = attr.ib(init=False, default=None)  # type: RealPath
 
-    open_files = attr.ib(init=False, default=Factory(dict))  # type: Dict[str, Download]
+    open_files = attr.ib(init=False, default=Factory(dict))  # type: Dict[int, Download]
     read_locks = attr.ib(init=False, repr=False, default=Factory(lambda: ThreadSafeDefaultDict(Lock)))
 
     @staticmethod
@@ -189,7 +189,7 @@ class FUSEView(object):
             return xattr
 
     def open(self, path, flags):
-        resolved_real_file: RealPath = self._resolve(path)
+        resolved_real_file = self._resolve(path)  # type: RealPath
         if not resolved_real_file:
             raise FuseOSError(errno.ENOENT)
         elif resolved_real_file.is_folder:

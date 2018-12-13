@@ -102,9 +102,9 @@ def session_context(args, loop, future: concurrent.futures.Future, ioimpl=aioimp
     stack = AsyncExitStack()
 
     async def enter():
-        http_client: HTTPClient = await stack.enter_async_context(
+        http_client = await stack.enter_async_context(
             ioimpl.HTTPClient(http_session=aiohttp.ClientSession, storage_dir=args.cache)
-        )
+        )  # type: HTTPClient
         session = StudIPSession(studip_base=args.studip, http=http_client)
         check_cancelled(future)
 

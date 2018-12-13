@@ -15,7 +15,7 @@ import aiofiles
 import aiofiles.os
 import aiohttp
 import attr
-from async_generator import asynccontextmanager
+from async_generator import asynccontextmanager, yield_, async_generator
 from async_lru import alru_cache
 from pyrsistent import freeze
 from yarl import URL
@@ -164,11 +164,12 @@ class AiohttpDownload(Download):
         assert not self.is_loading
 
     @asynccontextmanager
+    @async_generator
     async def state_manager(self):
         assert not self.is_loading and not self.is_completed
         self.state = DownloadState.VALIDATING
         try:
-            yield
+            await yield_()
         finally:
             if self.state != DownloadState.DONE:
                 self.state = DownloadState.FAILED
