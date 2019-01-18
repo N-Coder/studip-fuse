@@ -58,7 +58,7 @@ def parse_args():
     http_opts.add_argument("--force-close", action="store_true", help="disable HTTP keep-alive")
     debug_aio = http_opts.add_argument("--debug-aio", help="turn on aiohttp debug logging", action="store_true")
 
-    parser = argparse.ArgumentParser(description="Stud.IP FUSE driver",
+    parser = argparse.ArgumentParser(description="studip-fuse is a FUSE (file-system in user-space) driver that provides files from lectures in the course management tool Stud.IP on your computer.",
                                      formatter_class=argparse.ArgumentDefaultsHelpFormatter,
                                      parents=[opts_parser])
     parser.add_argument("user", help="Stud.IP username")
