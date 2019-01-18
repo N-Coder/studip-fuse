@@ -291,10 +291,6 @@ class StudIPPath(VirtualPath):
         if self._course:
             number = re.sub("[^0-9]", "", str(self._course["number"]))
             type_abbrev = re.sub("[0-9]", "", str(self._course["number"]))
-            type_obj = self.session.studip_course_type[self._course["type"]]
-            # map for [int(id), str(id) and name] -> {'id': 21, 'name': 'Workshop', 'class': '3'}
-            clazz_obj = self.session.studip_course_class[type_obj["class"]]
-            # map for [int(id), str(id) and name] -> {'id': 4, 'name': 'Studien-/Arbeitsgruppen', ...}
             tokens.update({
                 "course-id": self._course["course_id"],  # '00093e6878c6c7733579251567a177da'
                 "course-number": self.__escape(number),  # '5795'
@@ -303,9 +299,9 @@ class StudIPPath(VirtualPath):
                 "course-description": self.__escape(self._course["description"]),  # ''
                 "course-abbrev": self.__escape(Abbrev.course_abbrev(self._course["title"])),
                 "course-type-abbrev": self.__escape(type_abbrev),
-                "course-type": self.__escape(type_obj["name"]),  # 'Uebung'
-                "course-type-short": self.__escape(Abbrev.course_type_abbrev(type_obj["name"])),  # 'U'
-                "course-class": self.__escape(clazz_obj["name"]),  # 'Lehre'
+                "course-type": self.__escape(self._course["type"]),  # 'Uebung'
+                "course-type-short": self.__escape(Abbrev.course_type_abbrev(self._course["type"])),  # 'U'
+                "course-class": self.__escape(self._course["class"]),  # 'Lehre'
                 "course-location": self.__escape(self._course["location"]),  # ''
                 "course-group": self.__escape(self._course["group"]),  # 1
 

@@ -63,6 +63,17 @@ def studip_iter(get_next, start, max_total=None) -> AsyncGenerator[FrozenDict, N
     return studip_iter_(get_next, start, max_total)
 
 
+@async_generator
+async def asyncified_iter_(it):
+    for val in it:
+        await yield_(val)
+
+
+def asyncified_iter(it) -> AsyncGenerator:  # fix type information for PyCharm
+    # noinspection PyTypeChecker
+    return asyncified_iter_(it)
+
+
 def append_base_url_slash(value):
     value = URL(value)
     if not value.path.endswith("/"):
@@ -79,16 +90,17 @@ class StudIPSession(object):
     studip_base = attr.ib(converter=append_base_url_slash)  # type: URL
     http = attr.ib()  # type: HTTPClient
 
-    studip_course_type = attr.ib(init=False)  # type: FrozenDict
-    studip_course_class = attr.ib(init=False)  # type: FrozenDict
+    studip_course_type = attr.ib(init=False)  # type: FrozenDict # map for [int(id), str(id) and name] -> {'id': 21, 'name': 'Workshop', 'class': '3'}
+    studip_course_class = attr.ib(init=False)  # type: FrozenDict # map for [int(id), str(id) and name] -> {'id': 4, 'name': 'Studien-/Arbeitsgruppen', ...}
     studip_file_tou = attr.ib(init=False)  # type: FrozenDict
-    studip_folder_types = attr.ib(init=False)  # type: FrozenDict
-    studip_course_types = attr.ib(init=False)  # type: FrozenDict
+    studip_folder_type = attr.ib(init=False)  # type: FrozenDict
+    studip_semester = attr.ib(init=False)  # type: FrozenDict
 
     def studip_url(self, url):
         return self.studip_base.join(URL(url))
 
     async def get_studip_json(self, url):
+        # FIXME session expiration
         url = URL(url)
         if not url.path.startswith("/") and url.path not in REQUIRED_API_ENDPOINTS:
             if not any([re.match(p, url.path) for p in ENDPOINT_REGEXES]):
@@ -99,7 +111,6 @@ class StudIPSession(object):
     def with_middleware(cls, async_annotation, agen_annotation, download_annotation, name="GenericMiddlewareStudIPSession"):
         return type(name, (cls,), {
             "get_user": async_annotation(cls.get_user),
-            "get_settings": async_annotation(cls.get_settings),
             "get_course_root_folder": async_annotation(cls.get_course_root_folder),
             "get_folder_details": async_annotation(cls.get_folder_details),
             "get_file_details": async_annotation(cls.get_file_details),
@@ -128,7 +139,6 @@ class StudIPSession(object):
             self.studip_course_type[int(key)] = value
             self.studip_course_type[str(key)] = value
             self.studip_course_type[str(value["name"])] = value
-            # FIXME Seminar is Community, not Lehre
         self.studip_course_type = freeze(self.studip_course_type)
 
         self.studip_course_class = {}
@@ -144,13 +154,19 @@ class StudIPSession(object):
             self.studip_file_tou[tou["id"]] = tou  # id is a str like UNDEF_LICENSE
         self.studip_file_tou = freeze(self.studip_file_tou)
 
-        self.studip_folder_types = await self.get_studip_json("studip/file_system/folder_types")
+        self.studip_folder_type = await self.get_studip_json("studip/file_system/folder_types")
+
+        self.studip_semester = {}
+        async for sem in studip_iter(self.get_studip_json, "semesters"):
+            self.studip_semester[self.extract_id(sem)] = sem
+        self.studip_semester = freeze(self.studip_semester)
 
         log.info("Logged in as %s on %s Stud.IP Version %s running at %s",
                  username, settings["UNI_NAME_CLEAN"], await self.get_version(), self.studip_base)
 
     async def get_version(self):
         # FIXME can't get version from REST API in JSON
+        # noinspection PyUnresolvedReferences
         async with self.http.http_session.get(self.studip_url("/studip/dispatch.php/siteinfo/")) as resp:
             from bs4 import BeautifulSoup
             soup = BeautifulSoup(await resp.text(), 'lxml')
@@ -159,35 +175,30 @@ class StudIPSession(object):
     async def get_user(self) -> FrozenDict:
         return await self.get_studip_json("user")
 
-    async def get_settings(self) -> FrozenDict:
-        return await self.get_studip_json("studip/settings")
-
     def get_semesters(self) -> AsyncGenerator[FrozenDict, None]:
-        return studip_iter(self.get_studip_json, "semesters")
+        return asyncified_iter(sorted(self.studip_semester.values(), key=lambda s: s["begin"]))
 
     @async_generator
     async def get_courses_(self, semester):
-        semesters = {self.extract_id(semester): semester async for semester in self.get_semesters()}
-        settings = await self.get_settings()
         user = await self.get_user()
 
         url = "user/%s/courses?semester=%s" % (self.extract_id(user), self.extract_id(semester))
         async for course in studip_iter(self.get_studip_json, url):
             course_ev = course.evolver()
             if course.get("start_semester", None):
-                start_semester = semesters[self.extract_id(course["start_semester"])]
+                start_semester = self.studip_semester[self.extract_id(course["start_semester"])]
                 course_ev["start_semester"] = start_semester
                 course_ev["start_date"] = start_semester["begin"]
             if course.get("end_semester", None):
-                end_semester = semesters[self.extract_id(course["end_semester"])]
+                end_semester = self.studip_semester[self.extract_id(course["end_semester"])]
                 course_ev["end_semester"] = end_semester
                 course_ev["end_date"] = end_semester["end"]
 
-            type_data = settings["SEM_TYPE"][course["type"]]
-            class_data = settings["SEM_CLASS"][type_data["class"]]
-
-            course_ev["type-nr"] = course["type"]
+            type_data = self.studip_course_type[course["type"]]
+            class_data = self.studip_course_class[type_data["class"]]
+            course_ev["type_id"] = type_data["id"]
             course_ev["type"] = type_data["name"]
+            course_ev["class_id"] = class_data["id"]
             course_ev["class"] = class_data["name"]
 
             await yield_(course_ev.persistent())
