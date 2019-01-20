@@ -47,15 +47,14 @@ $ fusermount -u ~/Stud.IP
 # Command-line options
 ```
 $ studip-fuse -h
-usage: studip-fuse [-h] [-o O [O ...]] [-d] [-v] [--pwfile PWFILE] [--format FORMAT] [--cache CACHE]
+usage: studip-fuse [-h] [-o O [O ...]] [-d] [-v] [--debug-aio] [--pwfile PWFILE] [--format FORMAT] [--cache CACHE]
                    [--login-method {shib,oauth,basic}] [--studip STUDIP] [--sso SSO] [-f] [-s] [--allow-other]
                    [--allow-root] [--nonempty] [--umask UMASK] [--uid UID] [--gid GID] [--default-permissions]
-                   [--debug-fuse] [--read-timeout READ_TIMEOUT] [--conn-timeout CONN_TIMEOUT]
-                   [--keepalive-timeout KEEPALIVE_TIMEOUT] [--limit LIMIT] [--force-close] [--debug-aio] [-V]
+                   [--debug-fuse] [-V]
                    user mount
 
-studip-fuse is a FUSE (file-system in user-space) driver that provides files from lectures 
-in the course management tool Stud.IP on your computer.
+studip-fuse is a FUSE (file-system in user-space) driver that provides files from lectures in the course management
+tool Stud.IP on your computer.
 
 positional arguments:
   user                  Stud.IP username
@@ -66,14 +65,15 @@ optional arguments:
   -o O [O ...]          FUSE-like options (default: None)
   -d, --debug           turn on all debugging options (default: False)
   -v, --debug-logging   turn on debug logging (default: False)
+  --debug-aio           turn on asyncio debug logging (default: False)
   -V, --version         show program's version number and exit
 
 Stud.IP Driver Options:
   --pwfile PWFILE       path to password file or '-' to read from stdin
-                        (default: /home/niko/.config/Stud.IP-Fuse/.studip-pw)
+                        (default: /home/user/.config/Stud.IP-Fuse/.studip-pw)
   --format FORMAT       format specifier for virtual paths
                         (default: {semester-lexical}/{course-class}/{course}/{course-type}/{short-path}/{file-name})
-  --cache CACHE         path to cache directory (default: /home/niko/.cache/Stud.IP-Fuse)
+  --cache CACHE         path to cache directory (default: /home/user/.cache/Stud.IP-Fuse)
   --login-method {shib,oauth,basic}
                         method for logging in to Stud.IP session (default: shib)
   --studip STUDIP       Stud.IP API URL (default: https://studip.uni-passau.de/studip/api.php/)
@@ -91,17 +91,6 @@ FUSE Options:
   --default-permissions
                         enable permission checking by kernel (default: False)
   --debug-fuse          enable FUSE debug mode (includes --foreground) (default: False)
-
-HTTP Client Options:
-  --read-timeout READ_TIMEOUT
-                        cumulative request operations timeout in seconds (default: 30)
-  --conn-timeout CONN_TIMEOUT
-                        timeout for connection acquiring in seconds (default: 30)
-  --keepalive-timeout KEEPALIVE_TIMEOUT
-                        timeout for connection reusing after releasing in seconds (default: 60)
-  --limit LIMIT         total number of simultaneous connections (default: 10)
-  --force-close         disable HTTP keep-alive (default: False)
-  --debug-aio           turn on aiohttp debug logging (default: False)
 
 ```
 

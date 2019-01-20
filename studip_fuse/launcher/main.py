@@ -18,7 +18,7 @@ def get_environment():
 
 def main():
     configure_logging()
-    args, http_args, fuse_args = parse_args()
+    args, fuse_args = parse_args()
     try:
         if not args.debug_logging:
             logging.root.setLevel(logging.INFO)
