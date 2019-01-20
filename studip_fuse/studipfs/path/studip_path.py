@@ -350,8 +350,8 @@ class StudIPPath(VirtualPath):
 
     # utils  ###########################################################################################################
 
-    def __escape(self, str):
-        return escape_file_name(str, Charset.Ascii, EscapeMode.Similar)
+    def __escape(self, val):
+        return escape_file_name(val, Charset.Ascii, EscapeMode.Similar)
 
     def __escape_path(self, folders):
         return join_path(*map(self.__escape, folders)) if folders else ""

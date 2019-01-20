@@ -153,13 +153,13 @@ This driver obeys the [Unix philosophy](https://en.wikipedia.org/wiki/Unix_philo
 For this reason, the following details are design-decisions and no bugs:
 - the whole mount is read-only, so no modification to the downloaded files is possible.
 - all information is cached in a static, but lazy way. This means that once you open a folder or file, its contents will be loaded once and stay the same throughout the whole lifetime of the program, even if they are changed online.
-  To load the updated information, you need to restart the driver or open a file descriptor for the hidden file ".clear_caches" (e.g. using `cat Stud.IP/.clear_caches`).
+  To load the updated information, you need to restart the driver. <!-- or open a file descriptor for the hidden file ".clear_caches" (e.g. using `cat Stud.IP/.clear_caches`). -->
   Note: If a file didn't change online, its previously downloaded version may still be reused. Directories will always be loaded anew.
 - the driver needs to have a working internet connection to load new directories or files. Making already loaded files and folder persistently available when working offline is not guaranteed.
 - when mounting in background mode, problems with the Stud.IP API (e.g. wrong password) will only be detected _after_ the program forks to background. This problem will be reported to the syslog and the program exits.
 
 ...but there are existing tools that fix this peculiarities:
 - to keep all files available for offline use, just use a standard synchronization tool like rsync ([example config](https://gist.github.com/n-st/b77e45895da58d99d381b9f97e3c3ad6)) or syncthing (with the driver running on your server).
-- to update information that has changed online, mount studip-fuse via autofs, so that it will be unmounted automatically once don't need it anymore. Once you access the folder again, the driver will be started anew and load the new information.
-- to make local changes to the files, use overlayfs to make the read-only studip-fuse filesystem writeable by storing the changes in a seperate location ([example config](https://gist.github.com/N-Coder/d5ec5356a12d8ee7a9069188e15f75ce)). This also enables you to delete (i.e. hide) and rename files and folders and renamed enities will still update their contents when they are changed online.
-- in the `user_data_dir` a file `studip-status.txt` will be created, which will be appended once the driver completed starting up. See [here](https://github.com/N-Coder/studip-fuse/issues/11) on how to use use `tail` and `grep` to wait for completed startup.
+- to update information that has changed online, mount studip-fuse via autofs, so that it will be unmounted automatically once you don't need it anymore. Once you access the folder again, the driver will be started anew and load the new information.
+- to make local changes to the files, use overlayfs to make the read-only studip-fuse filesystem writeable by storing the changes in a separate location ([example config](https://gist.github.com/N-Coder/d5ec5356a12d8ee7a9069188e15f75ce)). This also enables you to delete (i.e. hide) and rename files and folders, while renamed entities will still update their contents when they are changed online.
+- to wait for successful startup, check the file `studip-status.txt` in the `user_data_dir`, which will be appended once the driver completed starting up. See [here](https://github.com/N-Coder/studip-fuse/issues/11) on how to use use `tail` and `grep` for this.

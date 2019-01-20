@@ -129,10 +129,10 @@ def session_context(args, loop, future: concurrent.futures.Future, ioimpl=aioimp
         check_cancelled(future)
         yield loop.run_until_complete(task)
     finally:
-        async def exit():
+        async def cleanup():
             log.debug("Closing session")
             await stack.aclose()
             log.debug("Session closed")
 
         log.info("Initiating shut down sequence...")
-        loop.run_until_complete(exit())
+        loop.run_until_complete(cleanup())

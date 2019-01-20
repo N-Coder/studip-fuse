@@ -28,7 +28,7 @@ def parse_args():
                              choices=['shib', 'oauth', 'basic'])
     studip_opts.add_argument("--studip", help="Stud.IP API URL", type=URL,
                              default="https://studip.uni-passau.de/studip/api.php/")
-    studip_opts.add_argument("--sso", help="Studi.IP SSO URL", type=URL,
+    studip_opts.add_argument("--sso", help="Stud.IP SSO URL", type=URL,
                              default="https://studip.uni-passau.de/studip/index.php?again=yes&sso=shib")
 
     fuse_opts = opts_parser.add_argument_group("FUSE Options")

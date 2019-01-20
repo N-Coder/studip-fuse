@@ -51,9 +51,9 @@ class BaseHTTPClient(HTTPClient):
         p = soup.find('p')
         if 'class' in p.attrs and 'form-error' in p.attrs['class']:
             raise PermissionError("Error in Request: '%s'" % p.text, soup)
-        for input in soup.find_all('input'):
-            if 'name' in input.attrs and 'value' in input.attrs and input.attrs['name'] in saml_fields:
-                form_data[input.attrs['name']] = input.attrs['value']
-                form_url = input.find_parent("form").attrs['action']
+        for input_elem in soup.find_all('input'):
+            if 'name' in input_elem.attrs and 'value' in input_elem.attrs and input_elem.attrs['name'] in saml_fields:
+                form_data[input_elem.attrs['name']] = input_elem.attrs['value']
+                form_url = input_elem.find_parent("form").attrs['action']
 
         return form_url, form_data

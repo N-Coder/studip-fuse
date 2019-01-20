@@ -42,7 +42,7 @@ def main():
                 with open(args.pwfile) as f:
                     password = f.read().rstrip('\n')
             except FileNotFoundError as e:
-                logging.warning("%s. Either specifiy a file from which your Stud.IP password can be read "
+                logging.warning("%s. Either specify a file from which your Stud.IP password can be read "
                                 "or use `--pwfile -` to enter it using a prompt in the shell." % e)
                 return
         args.get_password = lambda: password  # wrap in lambda to prevent printing

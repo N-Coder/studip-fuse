@@ -12,8 +12,8 @@ import yaml
 from studip_fuse import __author__ as prog_author
 
 
-def excepthook(type, value, tb):
-    logging.error("Uncaught exception:", exc_info=(type, value, tb))
+def excepthook(ex_type, value, tb):
+    logging.error("Uncaught exception:", exc_info=(ex_type, value, tb))
 
 
 class LoggerWriter:
