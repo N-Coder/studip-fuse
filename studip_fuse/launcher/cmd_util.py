@@ -102,16 +102,31 @@ def get_version():
     import pkg_resources
     import subprocess
     import inspect
+    import json
 
     pkg_data = pkg_resources.require("studip_fuse")[0]
+    meta = json.loads(pkg_data.get_metadata('meta.json'))
+    install_git_rev = meta.get("install-git-revision", "unknown")
+    dirname = os.path.dirname(inspect.getfile(inspect.currentframe()))
     try:
         git_rev = subprocess.check_output(
             ["git", "describe", "--always"],
-            cwd=os.path.dirname(inspect.getfile(inspect.currentframe()))
+            cwd=dirname, stderr=subprocess.STDOUT
         ).decode('ascii').strip()
-    except NotADirectoryError:
+    except (OSError, subprocess.SubprocessError) as e:
+        logging.debug("Could not get git revision in install directory %s for package %s", dirname, pkg_data, exc_info=e)
+        if isinstance(e, subprocess.CalledProcessError):
+            logging.debug("stdout: %s\nstderr: %s", e.stdout, e.stderr)
         git_rev = "release"
-    if prog_version == pkg_data.version:
-        return "{} {} {}".format(pkg_data.project_name.title(), prog_version, git_rev)
+
+    install_notes = []
+    if prog_version != pkg_data.version:
+        install_notes.append("as version {}".format(pkg_data.version))
+    if git_rev != install_git_rev:
+        install_notes.append("from revision {}".format(install_git_rev))
+    if install_notes:
+        install_notes = "(installed {})".format(", ".join(install_notes))
     else:
-        return "{} {} (installed as {}) {}".format(pkg_data.project_name.title(), prog_version, pkg_data.version, git_rev)
+        install_notes = ""
+
+    return "{} {} {} {}".format(pkg_data.project_name.title(), prog_version, git_rev, install_notes).strip()

@@ -5,9 +5,15 @@ import platform
 
 import studip_fuse.launcher.aioimpl.asyncio as aioimpl_asyncio
 from studip_fuse.launcher.cmd_util import get_version, parse_args
-from studip_fuse.launcher.fuse import FUSE, fuse_get_context, get_fuse_version, get_fuse_libfile
+from studip_fuse.launcher.fuse import FUSE, fuse_get_context, get_fuse_libfile, get_fuse_version
 from studip_fuse.launcher.log_utils import configure_logging
 from studip_fuse.studipfs.fuse_ops import FUSEView, log_status
+
+
+def get_environment():
+    return "%s with FUSE %s (%s) running via %s %s on %s" \
+           % (get_version(), get_fuse_version(), get_fuse_libfile(),
+              platform.python_implementation(), platform.python_version(), platform.platform())
 
 
 def main():
@@ -36,14 +42,12 @@ def main():
                     password = f.read().rstrip('\n')
             except FileNotFoundError as e:
                 logging.warning("%s. Either specifiy a file from which your Stud.IP password can be read "
-                                "or use `--pwfile -` to enter it using a promt in the shell." % e)
+                                "or use `--pwfile -` to enter it using a prompt in the shell." % e)
                 return
         args.get_password = lambda: password  # wrap in lambda to prevent printing
 
         log_status("STARTING", args=args, level=logging.DEBUG)
-        logging.info("Starting %s with FUSE %s (%s) running via %s %s on %s"
-                     % (get_version(), get_fuse_version(), get_fuse_libfile(),
-                        platform.python_implementation(), platform.python_version(), platform.platform()))
+        logging.info("Starting %s" % get_environment())
         logging.debug("Going to mount at %s (uid=%s, gid=%s, pid=%s, python pid=%s)", args.mount,
                       *fuse_get_context(), os.getpid())
         # This calls fork if args.foreground == False (https://bugs.python.org/issue21998)
