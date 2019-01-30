@@ -182,7 +182,11 @@ class AiohttpDownload(Download):
             position = await aiofile.tell()
             assert position == self.total_length, "Download %s only got %s of %s bytes" % (self, position, self.total_length)
             timestamp = time.mktime(self.last_modified.timetuple())
-            await async_utime(self.local_path, (timestamp, timestamp))
+            if os.utime in os.supports_fd:
+                await async_utime(aiofile.fileno(), (timestamp, timestamp))
+            else:
+                await aiofile.close()
+                await async_utime(self.local_path, (timestamp, timestamp))  # FIXME mtime is not stable on Windows
             self.state = DownloadState.DONE
 
     async def start_loading(self):

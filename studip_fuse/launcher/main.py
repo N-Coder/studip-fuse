@@ -26,6 +26,7 @@ def main():
             logging.getLogger("asyncio").setLevel(logging.WARNING)
         logging.debug("Logging started")
 
+        # TODO on windows args.mount may not exist, on Linux it must exist
         os.makedirs(args.cache, exist_ok=True)
 
         if args.debug_fuse:

@@ -725,7 +725,7 @@ def fuse_exit():
         return
 
     fuse_ptr = ctypes.c_void_p(_libfuse.fuse_get_context().contents.fuse)
-    _libfuse.fuse_exit(fuse_ptr)
+    _libfuse.fuse_exit(fuse_ptr)  # FIXME OSError: exception: access violation reading 0x00000000000002E0
 
 
 class FuseOSError(OSError):
