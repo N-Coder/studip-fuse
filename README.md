@@ -44,6 +44,15 @@ You can unmount the folder and kill the driver the usual way:
 $ fusermount -u ~/Stud.IP
 ```
 
+To display file status information emblems and add an "Open on Stud.IP" option menu entry in Nautilus, run the following command to install the plug-in:
+```
+$ studip-fuse-install-nautilus-plugin                                                                                                                            [dev!][0][15:23]
+Checking requirements...
+Installing studip-fuse Nautilus extension to /home/niko/.local/share/nautilus-python/extensions...
+Copying script source code to /home/niko/.local/share/nautilus-python/extensions/studip_fuse_nautilus_plugin.py...
+Done installing, please restart Nautilus to enable the plugin.
+```
+
 # Command-line options
 ```
 $ studip-fuse -h
@@ -103,40 +112,62 @@ mount -t fuse -o allow_root,uid=1000,gid=1000 "studip-fuse#mueller123" /home/use
 
 ## Path formatting options
 You can use the following values in the format string for the generated paths:
-<!-- TODO update once format keys are stable -->
+
 <dl>
-    <dt>semester</dt>
-    <dd>semester name in the format "WS 17/18"</dd>
-    <dt>semester-lexical</dt>
-    <dd>semester name in the format "2017WS18"</dd>
-    <dt>semester-lexical-short</dt>
-    <dd>semester name in the format "2017WS"</dd>
-    <dt>course</dt>
-    <dd>the full name of the course</dd>
-    <dt>course-abbrev</dt>
-    <dd>an abbreviation of the course name using its initials</dd>
-    <dt>course-id</dt>
-    <dd>the UUID of the course</dd>
-    <dt>type</dt>
-    <dd>the type of the course (Vorlesung, Uebung, Seminar, ...)</dd>
-    <dt>type-abbrev</dt>
-    <dd>an abbreviation of the course type using its initials (V, U, S,...)</dd>
-    <dt>path</dt>
-    <dd>the full path to the file in the course</dd>
-    <dt>short-path</dt>
-    <dd>the path to the file in the course, without generic prefixes like "Allgemeiner Dateiordner"</dd>
-    <dt>id</dt>
-    <dd>the UUID of the file</dd>
-    <dt>name</dt>
-    <dd>the filename, including its extension</dd>
-    <dt>description</dt>
-    <dd>the description of the file</dd>
-    <dt>author</dt>
-    <dd>the author of the file</dd>
-    <dt>created</dt>
-    <dd>timestamp when the file was created</dd>
-    <dt>changed</dt>
-    <dd>timestamp when the file was last changed</dd>
+<dt>path</dt>
+<dd>path to the file, relative to the root folder of the course<br/><i>Example: Hauptordner/Skript/PDF-Versionen</i></dd>
+<dt>short-path</dt>
+<dd>path to the file, relative to the root folder of the course, stripped from common parts<br/><i>Example: Skript/PDF-Versionen</i></dd>
+<dt>semester</dt>
+<dd>full semester name<br/><i>Example: Wintersemester 2018-2019</i></dd>
+<dt>semester-id</dt>
+<dd>system-internal hexadecimal UUID of the semester<br/><i>Example: 36bd96b432c1169978c1594d2251e629</i></dd>
+<dt>semester-lexical</dt>
+<dd>full semester name, allowing alphabetic sorting<br/><i>Example: 2018 WS -19</i></dd>
+<dt>semester-lexical-short</dt>
+<dd>shortened semester name, allowing alphabetic sorting<br/><i>Example: 2018WS</i></dd>
+<dt>semester-short</dt>
+<dd>shortened semester name<br/><i>Example: WS 18-19</i></dd>
+<dt>course</dt>
+<dd>official name of the course, usually excluding its type<br/><i>Example: Algorithmen und Datenstrukturen</i></dd>
+<dt>course-abbrev</dt>
+<dd>abbreviation of the course name, generated from its initials<br/><i>Example: AuD</i></dd>
+<dt>course-class</dt>
+<dd>type of the course (teaching, community,...)<br/><i>Example: Lehre</i></dd>
+<dt>course-description</dt>
+<dd>optional description given for the course</dd>
+<dt>course-group</dt>
+<dd>user-assigned (color-)group of the course on the Stud.IP overview page<br/><i>Example: 7</i></dd>
+<dt>course-id</dt>
+<dd>system-internal hexadecimal UUID of the course<br/><i>Example: eceaf9871792e0339797d1be91f9015d</i></dd>
+<dt>course-location</dt>
+<dd>room where the course is held</dd>
+<dt>course-number</dt>
+<dd>number assigned to the course in the course catalogue<br/><i>Example: 5200</i></dd>
+<dt>course-subtitle</dt>
+<dd>optional subtitle assigned to the course</dd>
+<dt>course-type</dt>
+<dd>type of the course (lecture, exercise,...)<br/><i>Example: Vorlesung</i></dd>
+<dt>course-type-short</dt>
+<dd>abbreviated type of the course, usually the letter appended to the course number in the course catalogue<br/><i>Example: V</i></dd>
+<!--<dt>file-author</dt>
+<dd>the person that uploaded this file<br/><i>Example: Prof. Dr. Franz Brandenburg </i></dd>-->
+<dt>file-description</dt>
+<dd>optional description given for the file<br/><i>Example: Kapitel 1</i></dd>
+<dt>file-downloads</dt>
+<dd>number of times the file has been downloaded<br/><i>Example: 3095</i></dd>
+<dt>file-id</dt>
+<dd>system-internal hexadecimal UUID of the file<br/><i>Example: 8556e68de68b5e33d8d4572057431233</i></dd>
+<dt>file-mime-type</dt>
+<dd>file's mime-type detected by Stud.IP<br/><i>Example: application-pdf</i></dd>
+<dt>file-name</dt>
+<dd>(base-)name of the file, including its extension<br/><i>Example: A+D141.pdf</i></dd>
+<dt>file-size</dt>
+<dd>file size in bytes<br/><i>Example: 3666701</i></dd>
+<dt>file-storage</dt>
+<dd>how the file is stored on the Stud.IP server<br/><i>Example: disk</i></dd>
+<dt>file-terms</dt>
+<dd>terms on which the file might be used<br/><i>Example: SELFMADE_NONPUB</i></dd>
 </dl>
 
 You can combine these formatting options in any way you like, e.g.:
@@ -146,6 +177,26 @@ studip-fuse mueller123 ~/Stud.IP --format="{semester-lexical-short}/{course-abbr
 Not all combinations have been tested, if you encounter any problems with a (sensible) combination, please open a bug report.
 Please note that depending on your path format, generating folder listings could become very slow.
 For example using the format "{course}/{semester-lexical-short} {type-abbrev}/{short-path}/{name}" would require listing all your courses from all your semesters, which might take a while.
+
+### Further information on files
+
+To get more information on the files in your Stud.IP folder, have a look at their xargs:
+```
+$ attr -l '~/Stud.IP/2014 SS/Lehre/Algorithmen und Datenstrukturen/Vorlesung/Skript/PDF-Versionen/A+D141.pdf'
+```
+The following keys are available:
+<dl>
+<dt>"studip-fuse.known-tokens"</dt>
+<dd>JSON-object with all the tokens mentioned above and their corresponding values for the respective file</dd>
+<dt>"studip-fuse.json"</dt>
+<dd>big JSON-object with *all* the information we got from the Stud.IP REST API</dd>
+<dt>"studip-fuse.contents-status"</dt>
+<dd>string indicating whether the contents of the file or folder are available yet:<br/>pending, available, failed, unknown or unavailable</dd>
+<dt>"studip-fuse.contents-excpetion"</dt>
+<dd>exception that prevented the contents of the file or folder from being loaded</dd>
+<dt>"studip-fuse.url"</dt>
+<dd>absolute URL to the object in the Stud.IP web interface</dd>
+</dl>
 
 # Modes of Operation
 This driver obeys the [Unix philosophy](https://en.wikipedia.org/wiki/Unix_philosophy) of doing one thing well and working together with other programs. Advanced features, for which generic solutions already exists, haven't been implemented redundantly to keep the program simple.

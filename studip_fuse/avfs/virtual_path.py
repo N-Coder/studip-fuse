@@ -1,7 +1,7 @@
 import logging
-from abc import abstractmethod
+from abc import ABC, abstractmethod
 from string import Formatter
-from typing import Any, Dict, List, NewType, Optional, Set, Tuple, Type, Union
+from typing import Any, Callable, Dict, Iterable, List, NewType, Optional, Set, Tuple, Union
 
 import attr
 from cached_property import cached_property
@@ -13,20 +13,20 @@ from studip_fuse.avfs.path_util import commonpath, join_path, normalize_path, pa
 log = logging.getLogger(__name__)
 FORMATTER = Formatter()
 
-__all__ = ["FormatToken", "DataField", "get_format_str_fields", "VirtualPath"]
+__all__ = ["FormatToken", "DataField", "get_format_str_fields", "VirtualPath", "FormatTokenGenerator", "FormatTokenGeneratorVirtualPath"]
 
 FormatToken = NewType("FormatToken", str)
-DataField = NewType("DataField", str)
+DataField = NewType("DataField", Any)
 
 
-def get_format_str_fields(format_segment) -> Set[Type]:
+def get_format_str_fields(format_segment) -> Set[FormatToken]:
     for (literal_text, field_name, format_spec, conversion) in FORMATTER.parse(format_segment):
         if field_name:
             yield field_name
 
 
 @attr.s(frozen=True, str=False)
-class VirtualPath(object):
+class VirtualPath(ABC):
     parent = attr.ib()  # type: Optional['VirtualPath']
     path_segments = attr.ib(convert=freeze)  # type: Tuple[Union[str, FormatToken]]
     known_data = attr.ib(convert=freeze)  # type: Dict[DataField, Any]
@@ -105,20 +105,20 @@ class VirtualPath(object):
 
     @property
     @abstractmethod
-    def segment_needs_expand_loop(self) -> bool:
-        """
-        Whether the currently generated path segment contains a token that is itself a path,
-        that might be appended in the next step.
-        """
-        pass
-
-    @property
-    @abstractmethod
     def known_tokens(self) -> Dict[FormatToken, Any]:
         """
         The already known format tokens for generating the partial path from the format string template.
         This converts the Dict[DataField, Any] known_data to a Dict[FormatToken, Any],
         mapping known DataFields to derived FormatTokens.
+        """
+        pass
+
+    @property
+    @abstractmethod
+    def segment_needs_expand_loop(self) -> bool:
+        """
+        Whether the currently generated path segment contains a token that is itself a path,
+        that might be appended in the next step.
         """
         pass
 
@@ -201,3 +201,46 @@ class VirtualPath(object):
 
     def known_data_str(self, key: DataField, value):
         return "%s(%s)" % (key, getattr(value, "id", "?"))
+
+
+@attr.s()
+class FormatTokenGenerator(object):
+    key = attr.ib()  # type: FormatToken
+    requirements = attr.ib()  # type: List[DataField]
+    generator = attr.ib()  # type: Callable[[VirtualPath], str]
+    doc = attr.ib(default=None)  # type: str
+
+
+class FormatTokenGeneratorVirtualPath(VirtualPath):
+    def __init_subclass__(cls, **kwargs):
+        setattr(cls, "format_token_generators", {ftg.key: ftg for ftg in cls.get_format_token_generators()})
+
+    format_token_generators = NotImplemented
+
+    @classmethod
+    @abstractmethod
+    def get_format_token_generators(cls) -> Iterable[FormatTokenGenerator]:
+        pass
+
+    @cached_property
+    def content_options(self):
+        requirements = set()
+        if self.next_path_segments:
+            format_segment = path_head(self.next_path_segments)
+            for field_name in get_format_str_fields(format_segment):
+                if field_name not in self.format_token_generators:
+                    raise ValueError("Unknown format field name '%s' in format string '%s'" % (field_name, format_segment))
+
+                requirements.update(self.format_token_generators[field_name].requirements)
+
+        return requirements
+
+    @cached_property
+    def known_tokens(self):
+        data = {}
+        known_keys = set(self.known_data.keys())
+        for token in self.format_token_generators.values():
+            if known_keys.issuperset(token.requirements):
+                data[token.key] = token.generator(self)
+
+        return data

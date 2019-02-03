@@ -6,14 +6,14 @@ import warnings
 from datetime import datetime
 from enum import IntEnum
 from stat import S_IFDIR, S_IFREG, S_IRGRP, S_IROTH, S_IRUSR
-from typing import Any, Dict, Optional, Set, Tuple, Type
+from typing import Optional, Tuple, Type
 
 import attr
 from async_generator import async_generator, yield_
 from cached_property import cached_property
 
-from studip_fuse.avfs.path_util import join_path, path_head, path_name
-from studip_fuse.avfs.virtual_path import FormatToken, VirtualPath, get_format_str_fields
+from studip_fuse.avfs.path_util import join_path, path_name
+from studip_fuse.avfs.virtual_path import FormatTokenGeneratorVirtualPath, VirtualPath
 from studip_fuse.launcher.fuse import FuseOSError
 from studip_fuse.studipfs.api.aiointerface import Download, Pipeline
 from studip_fuse.studipfs.api.session import StudIPSession
@@ -62,24 +62,9 @@ class Abbrev:
             abbrev = "".join(w[0] for w in words if len(w) > 0)
         return abbrev + number
 
-    @classmethod
-    def course_type_abbrev(cls, typ):
-        # TODO use data from complete type listing
-        special_abbrevs = {
-            "Arbeitsgemeinschaft": "AG",
-            "Studien-/Arbeitsgruppe": "SG",
-        }
-        try:
-            return special_abbrevs[typ]
-        except KeyError:
-            abbrev = typ[0]
-            if typ.endswith("seminar"):
-                abbrev += "S"
-            return abbrev
-
 
 @attr.s(frozen=True, str=False, repr=False, hash=False)
-class StudIPPath(VirtualPath):
+class StudIPPath(FormatTokenGeneratorVirtualPath):
     session = attr.ib()  # type: StudIPSession
     pipeline_type = attr.ib()  # type: Type[Pipeline]
 
@@ -186,7 +171,12 @@ class StudIPPath(VirtualPath):
         return d
 
     async def getxattr(self):
-        xattrs = dict(self.known_tokens)
+        import json
+        from pyrsistent import thaw
+
+        xattrs = {}
+        xattrs["known-tokens"] = json.dumps(self.known_tokens)
+
         if self.is_folder:
             # list_contents is not cached, so we don't know here whether that information is available
             # see studip_fuse.launcher.aioimpl.asyncio.alru_realpath.CachingRealPath for an implementation
@@ -212,8 +202,7 @@ class StudIPPath(VirtualPath):
         if isinstance(xattrs.get("contents-exception", None), BaseException):
             exc = xattrs["contents-exception"]
             xattrs["contents-exception"] = "%s: %s" % (type(exc).__name__, exc)
-        import json
-        from pyrsistent import thaw
+
         url = "/studip/dispatch.php/"
         if self._file:
             url += "file/details/%s?cid=%s" % (self._file["id"], self._course["course_id"])
@@ -226,6 +215,7 @@ class StudIPPath(VirtualPath):
         else:
             url += "my_courses"
         xattrs["url"] = self.session.studip_url(url)
+
         xattrs["json"] = json.dumps({
             "semester": thaw(self._semester),
             "course": thaw(self._course),
@@ -241,86 +231,91 @@ class StudIPPath(VirtualPath):
 
     # public properties  ###############################################################################################
 
-    @cached_property
-    def content_options(self) -> Set[DataField]:
-        requirements = set()
-        if self.next_path_segments:
-            format_segment = path_head(self.next_path_segments)
-            for field_name in get_format_str_fields(format_segment):
-                # TODO course_class, course_type, folder_type and file_terms are well defined and can be listed without listing all courses/folders/files
-                # TODO update available field_names
-                if field_name in ["semester-id", "semester", "semester-short", "semester-lexical", "semester-lexical-short"]:
-                    requirements.add(Semester)
-                elif field_name in ["course-id", "course-number", "course", "course-subtitle", "course-description",
-                                    "course-abbrev", "course-type", "course-class", "course-type-abbrev", "course-type-short",
-                                    "course-location", "course-grouping"]:
-                    requirements.add(Course)
-                elif field_name in ["path", "short-path"]:
-                    requirements.add(Folder)
-                elif field_name in ["file-id", "file-name", "file-description", "file-size", "file-mime-type",
-                                    "file-terms", "file-storage", "file-downloads"]:
-                    requirements.add(File)
-                else:
-                    raise ValueError("Unknown format field name '%s' in format string '%s'" % (field_name, format_segment))
-        return requirements
+    @classmethod
+    def get_format_token_generators(cls):
+        from studip_fuse.avfs.virtual_path import FormatToken, FormatTokenGenerator as FTG
+
+        class SimpleFTG(FTG):
+            def __init__(self, key: FormatToken, req_key, val_key, doc=None):
+                super().__init__(key, [req_key], self.generator, doc)
+                self.req_key = req_key
+                self.val_key = val_key
+
+            def generator(self, vp: "StudIPPath"):
+                return vp.escape(vp.known_data[self.req_key][self.val_key])
+
+        return [
+            FTG("path", [],
+                lambda self: self.escape_path(self.known_folder_path[0]),
+                """path to the file, relative to the root folder of the course"""),
+            FTG("short-path", [],
+                lambda self: self.escape_path(self.known_folder_path[1]),
+                """path to the file, relative to the root folder of the course, stripped from common parts"""),
+
+            FTG("semester-lexical", [Semester],
+                lambda self: self.escape(Abbrev.semester_lexical(self._semester["title"])),
+                """full semester name, allowing alphabetic sorting"""),
+            FTG("semester-lexical-short", [Semester],
+                lambda self: self.escape(Abbrev.semester_lexical_short(self._semester["title"])),
+                """shortened semester name, allowing alphabetic sorting"""),
+
+            FTG("course-number", [Course],
+                lambda self: self.escape(re.sub("[^0-9]", "", str(self._course["number"]))),
+                """number assigned to the course in the course catalogue"""),
+            FTG("course-abbrev", [Course],
+                lambda self: self.escape(Abbrev.course_abbrev(self._course["title"])),
+                """abbreviation of the course name, generated from its initials"""),
+            FTG("course-type-short", [Course],
+                lambda self: self.escape(re.sub("[0-9]", "", str(self._course["number"]))),
+                """abbreviated type of the course, usually the letter appended to the course number in the course catalogue"""),
+
+            SimpleFTG("semester-id", Semester, "id",
+                      """system-internal hexadecimal UUID of the semester"""),
+            SimpleFTG("semester", Semester, "description",
+                      """full semester name"""),
+            SimpleFTG("semester-short", Semester, "title",
+                      """shortened semester name"""),
+
+            SimpleFTG("course-id", Course, "course_id",
+                      """system-internal hexadecimal UUID of the course"""),
+            SimpleFTG("course", Course, "title",
+                      """official name of the course, usually excluding its type"""),
+            SimpleFTG("course-subtitle", Course, "subtitle",
+                      """optional subtitle assigned to the course"""),
+            SimpleFTG("course-description", Course, "description",
+                      """optional description given for the course"""),
+            SimpleFTG("course-type", Course, "type",
+                      """type of the course (lecture, exercise,...)"""),
+            SimpleFTG("course-class", Course, "class",
+                      """type of the course (teaching, community,...)"""),
+            SimpleFTG("course-location", Course, "location",
+                      """room where the course is held"""),
+            SimpleFTG("course-group", Course, "group",
+                      """user-assigned (color-)group of the course on the Stud.IP overview page"""),
+
+            SimpleFTG("file-id", File, "id",
+                      """system-internal hexadecimal UUID of the file"""),
+            # SimpleFTG("file-author", File, "user_id", # unfortunately, we would need another API call to resolve the name
+            #           """the UUID of the person that uploaded this file"""),
+            SimpleFTG("file-name", File, "name",
+                      """(base-)name of the file, including its extension"""),
+            SimpleFTG("file-description", File, "description",
+                      """optional description given for the file"""),
+            SimpleFTG("file-size", File, "size",
+                      """file size in bytes"""),
+            SimpleFTG("file-mime-type", File, "mime_type",
+                      """file's mime-type detected by Stud.IP"""),
+            SimpleFTG("file-terms", File, "content_terms_of_use_id",
+                      """terms on which the file might be used"""),
+            SimpleFTG("file-storage", File, "storage",
+                      """how the file is stored on the Stud.IP server"""),
+            SimpleFTG("file-downloads", File, "downloads",
+                      """number of times the file has been downloaded"""),
+        ]
 
     @cached_property
     def segment_needs_expand_loop(self) -> bool:
         return self.path_segments and any(t in path_name(self.path_segments) for t in ["{path}", "{short-path}"])
-
-    @cached_property
-    def known_tokens(self) -> Dict[FormatToken, Any]:
-        path, short_path = self.known_folder_path
-        tokens = {
-            "path": self.__escape_path(path),
-            "short-path": self.__escape_path(short_path),
-        }
-        if self._semester:
-            tokens.update({
-                "semester-id": self._semester["id"],  # '4cb8438b3057e71a627ab7e25d73ba75'
-                "semester": self.__escape(self._semester["description"]),  # 'Wintersemester 2017/2018'
-                "semester-short": self.__escape(self._semester["title"]),  # 'WS 17/18'
-                "semester-lexical": self.__escape(Abbrev.semester_lexical(self._semester["title"])),
-                "semester-lexical-short": self.__escape(Abbrev.semester_lexical_short(self._semester["title"])),
-
-                # 'seminars_end': 1518303599,
-                # 'begin': 1506808800,
-                # 'end': 1522533599,
-                # 'seminars_begin': 1508104800
-            })
-        if self._course:
-            number = re.sub("[^0-9]", "", str(self._course["number"]))
-            type_abbrev = re.sub("[0-9]", "", str(self._course["number"]))
-            tokens.update({
-                "course-id": self._course["course_id"],  # '00093e6878c6c7733579251567a177da'
-                "course-number": self.__escape(number),  # '5795'
-                "course": self.__escape(self._course["title"]),  # 'Virtuelle Maschinen und Laufzeitsysteme'
-                "course-subtitle": self.__escape(self._course["subtitle"]),  # ''
-                "course-description": self.__escape(self._course["description"]),  # ''
-                "course-abbrev": self.__escape(Abbrev.course_abbrev(self._course["title"])),
-                "course-type-abbrev": self.__escape(type_abbrev),
-                "course-type": self.__escape(self._course["type"]),  # 'Uebung'
-                "course-type-short": self.__escape(Abbrev.course_type_abbrev(self._course["type"])),  # 'U'
-                "course-class": self.__escape(self._course["class"]),  # 'Lehre'
-                "course-location": self.__escape(self._course["location"]),  # ''
-                "course-group": self.__escape(self._course["group"]),  # 1
-
-                # 'start_semester': '/studip/api.php/semester/4cb8438b3057e71a627ab7e25d73ba75',
-                # 'end_semester': '/studip/api.php/semester/4cb8438b3057e71a627ab7e25d73ba75'
-            })
-        if self._file:
-            tokens.update({
-                "file-id": self.__escape(self._file["id"]),  # '3c90ca04794bce6661f985c664a5d6cd',
-                "file-author": self.__escape(self._file["user_id"]),  # 'cli'
-                "file-name": self.__escape(self._file["name"]),  # 'Virtuelle Maschinen und Laufzeitsysteme'
-                "file-description": self.__escape(self._file["description"]),  # ''
-                "file-size": self.__escape(self._file["size"]),  # '118738',
-                "file-mime-type": self.__escape(self._file["mime_type"]),  # 'application/pdf',
-                "file-terms": self.__escape(self._file["content_terms_of_use_id"]),  # 'SELFMADE_NONPUB',
-                "file-storage": self.__escape(self._file["storage"]),  # 'disk',
-                "file-downloads": self.__escape(self._file["downloads"]),  # '118',
-            })
-        return tokens
 
     @cached_property
     def known_folder_path(self) -> Tuple[str, str]:
@@ -350,11 +345,12 @@ class StudIPPath(VirtualPath):
 
     # utils  ###########################################################################################################
 
-    def __escape(self, val):
+    def escape(self, val):
+        # TODO make customizable?
         return escape_file_name(val, Charset.Ascii, EscapeMode.Similar)
 
-    def __escape_path(self, folders):
-        return join_path(*map(self.__escape, folders)) if folders else ""
+    def escape_path(self, folders):
+        return join_path(*map(self.escape, folders)) if folders else ""
 
     @cached_property
     def _file(self):
