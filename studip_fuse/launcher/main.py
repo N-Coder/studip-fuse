@@ -1,19 +1,12 @@
 import logging
 import logging.config
 import os
-import platform
 
 import studip_fuse.launcher.aioimpl.asyncio as aioimpl_asyncio
-from studip_fuse.launcher.cmd_util import get_version, parse_args
-from studip_fuse.launcher.fuse import FUSE, fuse_get_context, get_fuse_libfile, get_fuse_version
+from studip_fuse.launcher.cmd_util import parse_args, get_environment
+from studip_fuse.launcher.fuse import FUSE, fuse_get_context
 from studip_fuse.launcher.log_utils import configure_logging
 from studip_fuse.studipfs.fuse_ops import FUSEView, log_status
-
-
-def get_environment():
-    return "%s with FUSE %s (%s) running via %s %s on %s" \
-           % (get_version(), get_fuse_version(), get_fuse_libfile(),
-              platform.python_implementation(), platform.python_version(), platform.platform())
 
 
 def main():

@@ -11,6 +11,7 @@ import aiohttp
 
 import studip_fuse.launcher.aioimpl.asyncio as aioimpl_asyncio
 from studip_fuse.launcher.aioimpl.asyncio.alru_realpath import CachingRealPath
+from studip_fuse.launcher.cmd_util import get_environment
 from studip_fuse.studipfs.api.aiointerface import HTTPClient
 from studip_fuse.studipfs.api.session import StudIPSession
 from studip_fuse.studipfs.fuse_ops import LoopSetupResult
@@ -103,7 +104,9 @@ def session_context(args, loop, future: concurrent.futures.Future, ioimpl=aioimp
 
     async def enter():
         http_client = await stack.enter_async_context(
-            ioimpl.HTTPClient(http_session=aiohttp.ClientSession, storage_dir=args.cache)
+            ioimpl.HTTPClient(http_session=aiohttp.ClientSession(headers={
+                "User-Agent": get_environment()
+            }), storage_dir=args.cache)
         )  # type: HTTPClient
         session = StudIPSession(studip_base=args.studip, http=http_client)
         check_cancelled(future)

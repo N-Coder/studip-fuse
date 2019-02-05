@@ -50,7 +50,7 @@ def parse_args():
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
         parents=[opts_parser])
     parser.add_argument("user", help="Stud.IP username")
-    parser.add_argument("mount", help="path to mount point", type=lambda x:os.path.normpath(os.path.expanduser(x)))
+    parser.add_argument("mount", help="path to mount point", type=lambda x: os.path.normpath(os.path.expanduser(x)))
     parser.add_argument("-V", "--version", action="version", version="%(prog)s " + prog_version)
 
     args = parser.parse_args()
@@ -116,3 +116,13 @@ def get_version():
         install_notes = ""
 
     return "{} {} {} {}".format(pkg_data.project_name.title(), prog_version, git_rev, install_notes).strip()
+
+
+def get_environment():
+    import platform
+
+    from studip_fuse.launcher.fuse import get_fuse_libfile, get_fuse_version
+
+    return "%s with FUSE %s (%s) running via %s %s on %s" \
+           % (get_version(), get_fuse_version(), get_fuse_libfile(),
+              platform.python_implementation(), platform.python_version(), platform.platform())
