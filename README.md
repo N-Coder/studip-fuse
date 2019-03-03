@@ -2,9 +2,9 @@
 
 _studip-fuse_ is a FUSE (file-system in user-space) driver that provides files from lectures in the course management tool Stud.IP on your computer.
 
-_studip-fuse_ uses the official Stud.IP REST API, but still needs your username and password to log in via the standard Stud.IP login (`--login-method basic`) or Shibboleth (`--login-method shib`).
-All connections to the university servers transporting the login data are made via HTTPS.
-Your credentials will not be copied or distributed in any other way, passwordless OAuth login is currently work in progress.
+_studip-fuse_ uses the official Stud.IP REST API and authenticates via OAuth1, which will open a prompt in your browser on the first start.
+Password-based login via the standard Stud.IP login (using HTTP Basic Auth `--login-method basic`) or Shibboleth (`--login-method shib`) is also possible.
+All connections to the university servers transporting the login data are made via HTTPS and your credentials will not be copied or distributed in any other way.
 
 This program has been tested on
 - Ubuntu 16.04 using Python 3.5 and pip 8.1.1
@@ -48,18 +48,19 @@ To display file status information emblems and add an "Open on Stud.IP" option m
 ```
 $ studip-fuse-install-nautilus-plugin                                                                                                                            [dev!][0][15:23]
 Checking requirements...
-Installing studip-fuse Nautilus extension to /home/niko/.local/share/nautilus-python/extensions...
-Copying script source code to /home/niko/.local/share/nautilus-python/extensions/studip_fuse_nautilus_plugin.py...
+Installing studip-fuse Nautilus extension to /home/user/.local/share/nautilus-python/extensions...
+Copying script source code to /home/user/.local/share/nautilus-python/extensions/studip_fuse_nautilus_plugin.py...
 Done installing, please restart Nautilus to enable the plugin.
 ```
 
 # Command-line options
 ```
 $ studip-fuse -h
-usage: studip-fuse [-h] [-o O [O ...]] [-d] [-v] [--debug-aio] [--pwfile PWFILE] [--format FORMAT] [--cache CACHE]
-                   [--login-method {shib,oauth,basic}] [--studip STUDIP] [--sso SSO] [-f] [-s] [--allow-other]
-                   [--allow-root] [--nonempty] [--umask UMASK] [--uid UID] [--gid GID] [--default-permissions]
-                   [--debug-fuse] [-V]
+usage: studip-fuse [-h] [-o O [O ...]] [-d] [-v] [--debug-aio] [--format FORMAT] [--cache-dir CACHE_DIR]
+                   [--studip-url STUDIP_URL] [--login-method {shib,oauth,basic}] [--pwfile PWFILE] [--shib-url SHIB_URL]
+                   [--oauth-client-key OAUTH_CLIENT_KEY] [--oauth-session-token OAUTH_SESSION_TOKEN] [--oauth-no-login]
+                   [--oauth-no-browser] [--oauth-no-store] [-f] [-s] [--allow-other] [--allow-root] [--nonempty]
+                   [--umask UMASK] [--uid UID] [--gid GID] [--default-permissions] [--debug-fuse] [-V]
                    user mount
 
 studip-fuse is a FUSE (file-system in user-space) driver that provides files from lectures in the course management
@@ -78,15 +79,29 @@ optional arguments:
   -V, --version         show program's version number and exit
 
 Stud.IP Driver Options:
-  --pwfile PWFILE       path to password file or '-' to read from stdin
-                        (default: /home/user/.config/Stud.IP-Fuse/.studip-pw)
   --format FORMAT       format specifier for virtual paths
                         (default: {semester-lexical}/{course-class}/{course}/{course-type}/{short-path}/{file-name})
-  --cache CACHE         path to cache directory (default: /home/user/.cache/Stud.IP-Fuse)
+  --cache-dir CACHE_DIR, --cache CACHE_DIR
+                        path to cache directory (default: /home/user/.cache/Stud.IP-Fuse)
+  --studip-url STUDIP_URL, --studip STUDIP_URL
+                        Stud.IP API URL (default: https://studip.uni-passau.de/studip/api.php/)
+
+Authentication Options:
   --login-method {shib,oauth,basic}
-                        method for logging in to Stud.IP session (default: shib)
-  --studip STUDIP       Stud.IP API URL (default: https://studip.uni-passau.de/studip/api.php/)
-  --sso SSO             Studi.IP SSO URL (default: https://studip.uni-passau.de/studip/index.php?again=yes&sso=shib)
+                        method for logging in to Stud.IP session (default: oauth)
+  --pwfile PWFILE       path to password file or '-' to read from stdin (for 'basic' and 'shib' auth)
+                        (default: /home/user/.config/Stud.IP-Fuse/.studip-pw)
+  --shib-url SHIB_URL, --sso SHIB_URL
+                        Stud.IP SSO URL (default: https://studip.uni-passau.de/studip/index.php?again=yes&sso=shib)
+  --oauth-client-key OAUTH_CLIENT_KEY
+                        path to JSON file containing OAuth Client Key and Secret
+                        (default: [internal key for given Stud.IP instance])
+  --oauth-session-token OAUTH_SESSION_TOKEN
+                        path to file where the session keys should be read from/stored to
+                        (default: /home/user/.config/Stud.IP-Fuse/.studip-oauth-session)
+  --oauth-no-login      disable interactive OAuth authentication when no valid session token is found (default: False)
+  --oauth-no-browser    don't automatically open the browser during interactive OAuth authentication (default: False)
+  --oauth-no-store      don't store the new session token obtained after logging in (default: False)
 
 FUSE Options:
   -f, --foreground      run in foreground (default: False)
@@ -97,8 +112,7 @@ FUSE Options:
   --umask UMASK         set file permissions (octal) (default: None)
   --uid UID             set file owner (default: None)
   --gid GID             set file group (default: None)
-  --default-permissions
-                        enable permission checking by kernel (default: False)
+  --default-permissions enable permission checking by kernel (default: False)
   --debug-fuse          enable FUSE debug mode (includes --foreground) (default: False)
 
 ```
