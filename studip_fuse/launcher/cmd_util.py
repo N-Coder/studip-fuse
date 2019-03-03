@@ -19,17 +19,31 @@ def parse_args():
     opts_parser.add_argument("--debug-aio", help="turn on asyncio debug logging", action="store_true")
 
     studip_opts = opts_parser.add_argument_group("Stud.IP Driver Options")
-    studip_opts.add_argument("--pwfile", help="path to password file or '-' to read from stdin",
-                             default=os.path.join(dirs.user_config_dir, ".studip-pw"))
     studip_opts.add_argument("--format", help="format specifier for virtual paths",
                              default="{semester-lexical}/{course-class}/{course}/{course-type}/{short-path}/{file-name}")
-    studip_opts.add_argument("--cache", help="path to cache directory", default=dirs.user_cache_dir)
-    studip_opts.add_argument("--login-method", help="method for logging in to Stud.IP session", default="shib",
-                             choices=['shib', 'oauth', 'basic'])
-    studip_opts.add_argument("--studip", help="Stud.IP API URL", type=URL,
+    studip_opts.add_argument("--cache-dir", "--cache", help="path to cache directory",
+                             default=dirs.user_cache_dir)
+    studip_opts.add_argument("--studip-url", "--studip", help="Stud.IP API URL", type=URL,
                              default="https://studip.uni-passau.de/studip/api.php/")
-    studip_opts.add_argument("--sso", help="Stud.IP SSO URL", type=URL,
-                             default="https://studip.uni-passau.de/studip/index.php?again=yes&sso=shib")
+
+    auth_opts = opts_parser.add_argument_group("Authentication Options")
+    auth_opts.add_argument("--login-method", help="method for logging in to Stud.IP session",
+                           choices=['shib', 'oauth', 'basic'], default="oauth")
+    auth_opts.add_argument("--pwfile", help="path to password file or '-' to read from stdin (for 'basic' and 'shib' auth)",
+                           default=os.path.join(dirs.user_config_dir, ".studip-pw"))
+    auth_opts.add_argument("--shib-url", "--sso", help="Stud.IP SSO URL", type=URL,
+                           default="https://studip.uni-passau.de/studip/index.php?again=yes&sso=shib")
+    oauth_client_key_default = "[internal key for given Stud.IP instance]"
+    auth_opts.add_argument("--oauth-client-key", help="path to JSON file containing OAuth Client Key and Secret",
+                           default=oauth_client_key_default)
+    auth_opts.add_argument("--oauth-session-token", help="path to file where the session keys should be read from/stored to",
+                           default=os.path.join(dirs.user_config_dir, ".studip-oauth-session"))
+    auth_opts.add_argument("--oauth-no-login", help="disable interactive OAuth authentication when no valid session token is found",
+                           action="store_true")
+    auth_opts.add_argument("--oauth-no-browser", help="don't automatically open the browser during interactive OAuth authentication",
+                           action="store_true")
+    auth_opts.add_argument("--oauth-no-store", help="don't store the new session token obtained after logging in",
+                           action="store_true")  # customize oauth timeout?, port, URLs...
 
     fuse_opts = opts_parser.add_argument_group("FUSE Options")
     fuse_opts.add_argument("-f", "--foreground", help="run in foreground", action="store_true")
@@ -40,8 +54,7 @@ def parse_args():
     fuse_opts.add_argument("--umask", help="set file permissions (octal)", action="store")
     fuse_opts.add_argument("--uid", help="set file owner", action="store")
     fuse_opts.add_argument("--gid", help="set file group", action="store")
-    fuse_opts.add_argument("--default-permissions", help="enable permission checking by kernel",
-                           action="store_true")
+    fuse_opts.add_argument("--default-permissions", help="enable permission checking by kernel", action="store_true")
     fuse_opts.add_argument("--debug-fuse", help="enable FUSE debug mode (includes --foreground)", action="store_true")
 
     parser = argparse.ArgumentParser(
@@ -59,6 +72,8 @@ def parse_args():
         args.debug_logging = True
         args.debug_fuse = True
         args.debug_aio = True
+    if args.oauth_client_key == oauth_client_key_default:
+        args.oauth_client_key = None
 
     fuse_args = {a.dest: getattr(args, a.dest, None) for a in fuse_opts._group_actions
                  if getattr(args, a.dest, None) is not None}

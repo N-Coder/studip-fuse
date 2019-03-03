@@ -74,6 +74,7 @@ if __name__ == "__main__":
             "aiofiles",
             "async-generator",
             "async-lru",
+            "oauthlib",
 
             # Utils
             "attrs",

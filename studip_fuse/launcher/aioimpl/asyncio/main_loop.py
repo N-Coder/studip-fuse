@@ -103,22 +103,27 @@ def session_context(args, loop, future: concurrent.futures.Future, ioimpl=aioimp
     stack = AsyncExitStack()
 
     async def enter():
+        client_session = aiohttp.ClientSession(
+            headers={"User-Agent": get_environment()},
+            request_class=ioimpl.AuthenticatedClientRequest,
+            loop=loop
+        )  # will be aentered/aexited by http_client
         http_client = await stack.enter_async_context(
-            ioimpl.HTTPClient(http_session=aiohttp.ClientSession(headers={
-                "User-Agent": get_environment()
-            }), storage_dir=args.cache)
+            ioimpl.HTTPClient(http_session=client_session, storage_dir=args.cache_dir)
         )  # type: HTTPClient
-        session = StudIPSession(studip_base=args.studip, http=http_client)
+        session = StudIPSession(studip_base=args.studip_url, http=http_client)
         check_cancelled(future)
 
         log.info("Logging in via %s...", args.login_method)
         if args.login_method == "shib":
-            await http_client.shib_auth(start_url=args.sso, username=args.user, password=args.get_password())
+            await http_client.shib_auth(start_url=args.shib_url, username=args.user, password=args.get_password())
         elif args.login_method == "oauth":
-            await http_client.oauth2_auth(args)
+            await http_client.oauth1_auth(**args.get_oauth_args())
         else:  # if args.login_method == "basic":
-            await http_client.basic_auth(url=session.studip_url("user"), username=args.user, password=args.get_password())
+            await http_client.basic_auth(username=args.user, password=args.get_password())
         await session.check_login(username=args.user)
+        await session.prefetch_globals()
+        log.info("Logged in as %s on %s", args.user, await session.get_instance_name())
 
         root_vp = vpathimpl(parent=None, path_segments=[], known_data={}, next_path_segments=args.format.split("/"),
                             session=session, pipeline_type=ioimpl.Pipeline)

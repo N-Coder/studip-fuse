@@ -1,6 +1,7 @@
 import logging
 import re
 import warnings
+from collections import namedtuple
 from datetime import datetime
 from typing import AsyncGenerator, List, Mapping, Tuple
 
@@ -82,6 +83,11 @@ def append_base_url_slash(value):
     return value
 
 
+OAuth1URLs = namedtuple("OAuthURLs", ["access_token", "authorize", "request_token"])
+oauth1_prefix = "../dispatch.php/api/oauth/"
+default_oauth1_urls = OAuth1URLs(oauth1_prefix + "access_token", oauth1_prefix + "authorize", oauth1_prefix + "request_token")
+
+
 # Old docs: https://docs.studip.de/develop/Entwickler/RESTAPI
 # New docs: https://hilfe.studip.de/develop/Entwickler/RESTAPI
 
@@ -90,6 +96,9 @@ class StudIPSession(object):
     studip_base = attr.ib(converter=append_base_url_slash)  # type: URL
     http = attr.ib()  # type: HTTPClient
 
+    rel_oauth1_urls = attr.ib(default=default_oauth1_urls)  # type: OAuth1URLs
+
+    studip_settings = attr.ib(init=False, default=None)  # type: FrozenDict
     studip_course_type = attr.ib(init=False)  # type: FrozenDict # map for [int(id), str(id) and name] -> {'id': 21, 'name': 'Workshop', 'class': '3'}
     studip_course_class = attr.ib(init=False)  # type: FrozenDict # map for [int(id), str(id) and name] -> {'id': 4, 'name': 'Studien-/Arbeitsgruppen', ...}
     studip_file_tou = attr.ib(init=False)  # type: FrozenDict
@@ -98,6 +107,10 @@ class StudIPSession(object):
 
     def studip_url(self, url):
         return self.studip_base.join(URL(url))
+
+    @property
+    def oauth1_urls(self) -> OAuth1URLs:
+        return OAuth1URLs(*(self.studip_url(v) for v in self.rel_oauth1_urls))
 
     async def get_studip_json(self, url):
         # FIXME session expiration
@@ -121,9 +134,10 @@ class StudIPSession(object):
             "retrieve_file": download_annotation(cls.retrieve_file),
         })
 
-    async def check_login(self, username):
+    async def check_login(self, username=None):
         user_data = await self.get_studip_json("user")
-        assert user_data["username"] == username
+        if username:
+            assert user_data["username"] == username
 
         discovery = await self.get_studip_json("discovery")
         for path in REQUIRED_API_ENDPOINTS:
@@ -131,10 +145,13 @@ class StudIPSession(object):
             assert path in discovery
             assert "get" in discovery[path]
 
-        settings = await self.get_studip_json("studip/settings")
+        return user_data
+
+    async def prefetch_globals(self):
+        self.studip_settings = await self.get_studip_json("studip/settings")
 
         self.studip_course_type = {}
-        for key, value in settings["SEM_TYPE"].items():
+        for key, value in self.studip_settings["SEM_TYPE"].items():
             value = value.set("id", int(key))
             self.studip_course_type[int(key)] = value
             self.studip_course_type[str(key)] = value
@@ -142,7 +159,7 @@ class StudIPSession(object):
         self.studip_course_type = freeze(self.studip_course_type)
 
         self.studip_course_class = {}
-        for key, value in settings["SEM_CLASS"].items():
+        for key, value in self.studip_settings["SEM_CLASS"].items():
             value = value.set("id", int(key))
             self.studip_course_class[int(key)] = value
             self.studip_course_class[str(key)] = value
@@ -161,8 +178,12 @@ class StudIPSession(object):
             self.studip_semester[self.extract_id(sem)] = sem
         self.studip_semester = freeze(self.studip_semester)
 
-        log.info("Logged in as %s on %s Stud.IP Version %s running at %s",
-                 username, settings["UNI_NAME_CLEAN"], await self.get_version(), self.studip_base)
+    async def get_instance_name(self):
+        if not self.studip_settings:
+            self.studip_settings = await self.get_studip_json("studip/settings")
+
+        return "%s Stud.IP v%s running at %s" % \
+               (self.studip_settings["UNI_NAME_CLEAN"], await self.get_version(), self.studip_base)
 
     async def get_version(self):
         # FIXME can't get version from REST API in JSON

@@ -15,13 +15,15 @@ import aiofiles
 import aiofiles.os
 import aiohttp
 import attr
-from async_generator import asynccontextmanager, yield_, async_generator
+from aiohttp import ClientRequest, hdrs, helpers
+from async_generator import async_generator, asynccontextmanager, yield_
 from async_lru import alru_cache
+from oauthlib.oauth1 import Client as OAuth1Client
 from pyrsistent import freeze
 from yarl import URL
 
 from studip_fuse.studipfs.api.aiobase import BaseHTTPClient
-from studip_fuse.studipfs.api.aiointerface import Download, HTTPResponse
+from studip_fuse.studipfs.api.aiointerface import Download
 
 log = logging.getLogger(__name__)
 
@@ -29,9 +31,30 @@ async_stat = aiofiles.os.stat
 async_utime = aiofiles.os.wrap(os.utime)
 
 
+class AuthenticatedClientRequest(ClientRequest):
+    def update_auth(self, auth):
+        if auth is None:
+            auth = self.auth
+        if auth is None:
+            return
+
+        if isinstance(auth, helpers.BasicAuth):
+            self.headers[hdrs.AUTHORIZATION] = auth.encode()
+        elif isinstance(auth, OAuth1Client):
+            url, headers, _ = auth.sign(
+                str(self.url), str(self.method), None, self.headers
+            )
+            self.url = URL(url)
+            self.update_headers(headers)
+        elif callable(auth):
+            auth(self)
+        else:
+            raise TypeError('auth should be a BasicAuth() tuple, OAuth1Client or Callable')
+
+
 @attr.s()
 class AiohttpClient(BaseHTTPClient):
-    http_session = attr.ib()  # type: Union[aiohttp.ClientSession, Callable[[],aiohttp.ClientSession]]
+    http_session = attr.ib()  # type: Union[aiohttp.ClientSession, Callable[[], aiohttp.ClientSession]]
     exit_stack = attr.ib(init=False, default=attr.Factory(AsyncExitStack))  # type: AsyncExitStack
 
     @property
@@ -58,19 +81,13 @@ class AiohttpClient(BaseHTTPClient):
         self.exit_stack.push_async_exit(download.aclose)
         return download
 
-    async def basic_auth(self, url, username, password) -> HTTPResponse:
+    async def basic_auth(self, username, password):
         self.http_session._default_auth = aiohttp.BasicAuth(username, password)
-        async with self.http_session.get(url) as resp:
-            resp.raise_for_status()
-            try:
-                return HTTPResponse(resp.url, resp.headers, await resp.json())
-            except aiohttp.ContentTypeError:
-                return HTTPResponse(resp.url, resp.headers, await resp.text())
 
-    async def oauth2_auth(self, *args) -> HTTPResponse:
-        raise NotImplementedError()
+    async def oauth1_auth(self, **kwargs):
+        self.http_session._default_auth = OAuth1Client(**kwargs)
 
-    async def shib_auth(self, start_url, username, password) -> HTTPResponse:
+    async def shib_auth(self, start_url, username, password):
         async with self.http_session.get(start_url) as resp:
             resp.raise_for_status()
             post_url = self.parse_login_form(await resp.text())
@@ -92,10 +109,6 @@ class AiohttpClient(BaseHTTPClient):
 
         async with self.http_session.post(form_url, data=form_data) as resp:
             resp.raise_for_status()
-            try:
-                return HTTPResponse(resp.url, resp.headers, await resp.json())
-            except aiohttp.ContentTypeError:
-                return HTTPResponse(resp.url, resp.headers, await resp.text())
 
 
 class DownloadState(enum.Enum):

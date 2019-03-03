@@ -25,9 +25,9 @@ log_ops = log.getChild("ops")
 cached_signature = functools.lru_cache(typed=True)(inspect.signature)
 
 
-def log_status(status, args=None, level=logging.INFO):
-    args = (status, *fuse_get_context(), os.getpid(), args.user if args else "?", args.mount if args else "?")
-    logging.getLogger("studip_fuse.status").log(level, " ".join(["%s"] * len(args)), *args)
+def log_status(status, args=None, suffix=tuple(), level=logging.INFO):
+    data = (status, *fuse_get_context(), os.getpid(), args.user if args else "?", args.mount if args else "?") + suffix
+    logging.getLogger("studip_fuse.status").log(level, " ".join(["%s"] * len(data)), *data)
 
 
 def join_thread(loop_thread):

@@ -37,7 +37,7 @@ class HTTPClient(AsyncContextManager, ABC):
         return type(name, (cls,), {
             "get_json": get_json_annotation(cls.get_json),
             "basic_auth": auth_annotation(cls.basic_auth),
-            "oauth2_auth": auth_annotation(cls.oauth2_auth),
+            "oauth1_auth": auth_annotation(cls.oauth1_auth),
             "shib_auth": auth_annotation(cls.shib_auth),
             "retrieve": download_annotation(cls.retrieve),
         })
@@ -48,18 +48,16 @@ class HTTPClient(AsyncContextManager, ABC):
 
     # auth = (Method/Strategy x IO Interface x Endpoint URLs x User Credentials)
     @abstractmethod
-    async def basic_auth(self, url, username, password) -> HTTPResponse:
-        # url is some page requiring basic authentication, response is the data we got if the login was successful
+    async def basic_auth(self, username, password):
         pass
 
     @abstractmethod
-    async def oauth2_auth(self, *args) -> HTTPResponse:
+    async def oauth1_auth(self, **kwargs):
         pass
 
     @abstractmethod
-    async def shib_auth(self, start_url, username, password) -> HTTPResponse:
+    async def shib_auth(self, start_url, username, password):
         # url is the starting point of the Shibboleth flow, e.g. self._studip_url("/studip/index.php?again=yes&sso=shib")
-        # response is the page we've got forwarded to after the login was successful
         pass
 
     @abstractmethod
