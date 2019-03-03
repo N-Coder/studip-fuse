@@ -331,9 +331,12 @@ class StudIPPath(FormatTokenGeneratorVirtualPath):
                 path = [vp._folder["name"]] + path
 
                 is_ghost_folder = vp._folder.get("folder_type", None) in ["RootFolder"]
-                guess_ghost_folder = vp._folder["name"] in ["Allgemeiner Dateiordner", "Hauptordner", self._course["title"] if self._course else None]
-                if is_ghost_folder != guess_ghost_folder and vp._folder.get("folder_type", None) not in ["StandardFolder", "PermissionEnabledFolder"]:
-                    warnings.warn("Folder has name %s indicating a ghost folder, but type is %s: %s" % (
+                guess_ghost_folder = vp._folder["name"] in [
+                    None, "", "Allgemeiner Dateiordner", "Hauptordner",
+                    self._course["title"] if self._course else None]
+                is_special_folder = vp._folder.get("folder_type", None) not in ["StandardFolder", "PermissionEnabledFolder"]
+                if guess_ghost_folder and not is_ghost_folder and is_special_folder:
+                    warnings.warn("Folder has name '%s' indicating a ghost folder, but type is %s: %s" % (
                         vp._folder["name"], vp._folder["folder_type"], vp._folder))
                 if not (is_ghost_folder or guess_ghost_folder):
                     short_path = [vp._folder["name"]] + short_path
