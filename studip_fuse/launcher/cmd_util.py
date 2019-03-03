@@ -99,13 +99,17 @@ def StoreNameValuePair(option_parser):
     return anonymous_class
 
 
-def get_version():
+def get_version(details=True, path=False):
     import pkg_resources
     import subprocess
     import inspect
     import json
 
     pkg_data = pkg_resources.require("studip_fuse")[0]
+
+    if not details:
+        return "{} {}".format(pkg_data.project_name.title(), prog_version).strip()
+
     meta = json.loads(pkg_data.get_metadata('meta.json'))
     install_git_rev = meta.get("install-git-revision", "unknown")
     dirname = os.path.dirname(inspect.getfile(inspect.currentframe()))
@@ -125,6 +129,8 @@ def get_version():
         install_notes.append("as version {}".format(pkg_data.version))
     if git_rev != install_git_rev:
         install_notes.append("from revision {}".format(install_git_rev))
+    if path:
+        install_notes.append("at location {}".format(dirname))
     if install_notes:
         install_notes = "(installed {})".format(", ".join(install_notes))
     else:
