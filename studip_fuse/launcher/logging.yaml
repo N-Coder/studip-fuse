@@ -39,6 +39,7 @@ handlers:
 
 loggers:
   studip_fuse.status:
+    level: DEBUG
     handlers: [status]
     propagate: False
 
