@@ -9,11 +9,9 @@ import appdirs
 import pkg_resources
 import yaml
 
-from studip_fuse import __author__ as prog_author
-
 
 def excepthook(ex_type, value, tb):
-    logging.error("Uncaught exception:", exc_info=(ex_type, value, tb))
+    logging.getLogger(__name__).error("Uncaught exception:", exc_info=(ex_type, value, tb))
 
 
 class LoggerWriter:
@@ -44,7 +42,7 @@ class LoggerWriter:
 
 
 def configure_logging():
-    dirs = appdirs.AppDirs("Stud.IP-Fuse", prog_author)
+    dirs = appdirs.AppDirs("Stud.IP-Fuse", False)
     os.makedirs(dirs.user_data_dir, exist_ok=True)
 
     logging_path = os.path.join(dirs.user_config_dir, "studip-logging-config.yaml")

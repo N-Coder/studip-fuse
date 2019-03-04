@@ -6,11 +6,13 @@ import appdirs
 from more_itertools import flatten
 from yarl import URL
 
-from studip_fuse import __author__ as prog_author, __version__ as prog_version
+from studip_fuse import __version__ as prog_version
+
+log = logging.getLogger(__name__)
 
 
 def parse_args():
-    dirs = appdirs.AppDirs("Stud.IP-Fuse", prog_author)
+    dirs = appdirs.AppDirs("Stud.IP-Fuse", False)
 
     opts_parser = argparse.ArgumentParser(add_help=False)
     opts_parser.add_argument("-o", help="FUSE-like options", nargs="+", action=StoreNameValuePair(opts_parser))
@@ -94,7 +96,7 @@ def StoreNameValuePair(option_parser):
                 else:
                     option_parser.parse_args(["--" + value], namespace)
             if ignored_values:
-                logging.debug("Ignoring arguments %s" % ", ".join(ignored_values))
+                log.debug("Ignoring arguments %s" % ", ".join(ignored_values))
 
     return anonymous_class
 
@@ -119,9 +121,9 @@ def get_version(details=True, path=False):
             cwd=dirname, stderr=subprocess.STDOUT
         ).decode('ascii').strip()
     except (OSError, subprocess.SubprocessError) as e:
-        logging.debug("Could not get git revision in install directory %s for package %s", dirname, pkg_data, exc_info=e)
+        log.debug("Could not get git revision in install directory %s for package %s", dirname, pkg_data, exc_info=e)
         if isinstance(e, subprocess.CalledProcessError):
-            logging.debug("stdout: %s\nstderr: %s", e.stdout, e.stderr)
+            log.debug("stdout: %s\nstderr: %s", e.stdout, e.stderr)
         git_rev = "release"
 
     install_notes = []

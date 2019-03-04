@@ -8,6 +8,8 @@ from studip_fuse.launcher.fuse import FUSE, fuse_get_context
 from studip_fuse.launcher.log_utils import configure_logging
 from studip_fuse.studipfs.fuse_ops import FUSEView, log_status
 
+log = logging.getLogger(__name__)
+
 
 def login_oauth_args(args):
     def oauth_data_from_file(path):
@@ -63,7 +65,7 @@ def main():
             logging.getLogger("asyncio").setLevel(logging.WARNING)
 
         log_status("STARTING", args=args, level=logging.DEBUG)
-        logging.info("Starting %s" % get_environment())
+        log.info("Starting %s" % get_environment())
 
         # TODO on windows args.mount may not exist, on Linux it must exist
         os.makedirs(args.cache_dir, exist_ok=True)
@@ -84,22 +86,22 @@ def main():
                     with open(args.pwfile, "rt") as f:
                         password = f.read().rstrip('\n')
                 except FileNotFoundError as e:
-                    logging.warning("%s. Either specify a file from which your Stud.IP password can be read "
+                    log.warning("%s. Either specify a file from which your Stud.IP password can be read "
                                     "or use `--pwfile -` to enter it using a prompt in the shell." % e)
                     return
             args.get_password = lambda: password  # wrap in lambda to prevent printing
 
-        logging.debug("Going to mount at %s (uid=%s, gid=%s, pid=%s, python pid=%s)", args.mount,
-                      *fuse_get_context(), os.getpid())
+        log.debug("Going to mount at %s (uid=%s, gid=%s, pid=%s, python pid=%s)", args.mount,
+                  *fuse_get_context(), os.getpid())
         # This calls fork if args.foreground == False (https://bugs.python.org/issue21998)
         FUSE(fuse_ops, args.mount, debug=fuse_args.pop("debug_fuse"), **fuse_args)
     except SystemExit:
         pass
     except:
-        logging.error("main() function quit exceptionally", exc_info=True)
+        log.error("main() function quit exceptionally", exc_info=True)
     finally:
         log_status("TERMINATED", args=args, level=logging.DEBUG)
-        logging.debug("Program terminated")
+        log.debug("Program terminated")
 
 
 if __name__ == "__main__":

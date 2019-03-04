@@ -51,6 +51,9 @@ loggers:
     handlers: [syslog, file]
     propagate: False
 
+  aiohttp.access:
+    level: WARN
+
 root:
   level: DEBUG
   handlers: [syslog, file, console]
