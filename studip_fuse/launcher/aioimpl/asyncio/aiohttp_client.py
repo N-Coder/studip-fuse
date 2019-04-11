@@ -6,7 +6,6 @@ import re
 import time
 import warnings
 from asyncio import CancelledError, Future
-from contextlib import AsyncExitStack
 from datetime import datetime
 from stat import S_ISREG
 from typing import Callable, Union
@@ -16,6 +15,7 @@ import aiofiles.os
 import aiohttp
 import attr
 from aiohttp import ClientRequest, hdrs, helpers
+from async_exit_stack import AsyncExitStack
 from async_generator import async_generator, asynccontextmanager, yield_
 from async_lru import alru_cache
 from oauthlib.oauth1 import Client as OAuth1Client

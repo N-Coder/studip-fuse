@@ -64,17 +64,16 @@ if __name__ == "__main__":
             # "fusepy", # now included here
 
             # Launcher Requirements
-            "argparse",
             "appdirs",
             "pyyaml",
+            "oauthlib",
 
             # AsyncIO Requirements
-            "asyncio",
             "aiohttp",
             "aiofiles",
             "async-generator",
             "async-lru",
-            "oauthlib",
+            "async-exit-stack",
 
             # Utils
             "attrs",

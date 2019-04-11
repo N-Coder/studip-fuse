@@ -5,9 +5,10 @@ import logging
 import warnings
 from asyncio import AbstractEventLoop
 from concurrent.futures import CancelledError
-from contextlib import AsyncExitStack, ExitStack, contextmanager
+from contextlib import ExitStack, contextmanager
 
 import aiohttp
+from async_exit_stack import AsyncExitStack
 
 import studip_fuse.launcher.aioimpl.asyncio as aioimpl_asyncio
 from studip_fuse.launcher.aioimpl.asyncio.alru_realpath import CachingRealPath
