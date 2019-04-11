@@ -10,8 +10,6 @@ from contextlib import ExitStack, contextmanager
 import aiohttp
 from async_exit_stack import AsyncExitStack
 
-import studip_fuse.launcher.aioimpl.asyncio as aioimpl_asyncio
-from studip_fuse.launcher.aioimpl.asyncio.alru_realpath import CachingRealPath
 from studip_fuse.launcher.cmd_util import get_environment
 from studip_fuse.studipfs.api.aiointerface import HTTPClient
 from studip_fuse.studipfs.api.session import StudIPSession
@@ -99,8 +97,13 @@ def loop_context(args):
 
 
 @contextmanager
-def session_context(args, loop, future: concurrent.futures.Future, ioimpl=aioimpl_asyncio,
-                    vpathimpl=StudIPPath, rpathimpl=CachingRealPath):  # TODO allow selecting all these classes
+def session_context(args, loop, future: concurrent.futures.Future, ioimpl=None,
+                    vpathimpl=StudIPPath, rpathimpl=None):  # TODO allow selecting all these classes
+    if not ioimpl:
+        import studip_fuse.launcher.aioimpl.asyncio as ioimpl
+    if not rpathimpl:
+        from studip_fuse.launcher.aioimpl.asyncio.alru_realpath import CachingRealPath as rpathimpl
+
     stack = AsyncExitStack()
 
     async def enter():

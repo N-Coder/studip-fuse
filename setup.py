@@ -71,9 +71,7 @@ if __name__ == "__main__":
             # AsyncIO Requirements
             "aiohttp",
             "aiofiles",
-            "async-generator",
             "async-lru",
-            "async-exit-stack",
 
             # Utils
             "attrs",
@@ -84,6 +82,12 @@ if __name__ == "__main__":
             "beautifulsoup4",
             "lxml",
             "yarl",
+
+            # Compatibility
+            "typing",
+            "async-generator",
+            "async-exit-stack",
+
         ],
         entry_points={
             "console_scripts": [

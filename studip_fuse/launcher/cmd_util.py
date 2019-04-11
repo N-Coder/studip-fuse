@@ -112,8 +112,13 @@ def get_version(details=True, path=False):
     if not details:
         return "{} {}".format(pkg_data.project_name.title(), prog_version).strip()
 
-    meta = json.loads(pkg_data.get_metadata('meta.json'))
-    install_git_rev = meta.get("install-git-revision", "unknown")
+    install_git_rev = "unknown"
+    try:
+        meta = json.loads(pkg_data.get_metadata('meta.json'))
+        install_git_rev = meta.get("install-git-revision", install_git_rev)
+    except FileNotFoundError as e:
+        log.debug("Could not get git revision at install time", exc_info=e)
+
     dirname = os.path.dirname(inspect.getfile(inspect.currentframe()))
     try:
         git_rev = subprocess.check_output(
@@ -129,7 +134,7 @@ def get_version(details=True, path=False):
     install_notes = []
     if prog_version != pkg_data.version:
         install_notes.append("as version {}".format(pkg_data.version))
-    if git_rev != install_git_rev:
+    if git_rev != install_git_rev and install_git_rev != "unknown":
         install_notes.append("from revision {}".format(install_git_rev))
     if path:
         install_notes.append("at location {}".format(dirname))

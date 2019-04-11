@@ -42,7 +42,12 @@ def login_oauth_args(args):
     if not args.oauth_no_login:
         import asyncio
         from studip_fuse.launcher.aioimpl.asyncio.oauth import obtain_access_token_sessionless
-        oauth_client = asyncio.run(obtain_access_token_sessionless(oauth_client, studip_url=args.studip_url, open_browser=start_oauth_login_browser))
+        coro = obtain_access_token_sessionless(oauth_client, studip_url=args.studip_url, open_browser=start_oauth_login_browser)
+        loop = asyncio.get_event_loop()
+        try:
+            oauth_client = loop.run_until_complete(coro)
+        finally:
+            loop.close()
 
     if not args.oauth_no_store:
         with open(args.oauth_session_token, "wt") as f:
@@ -87,7 +92,7 @@ def main():
                         password = f.read().rstrip('\n')
                 except FileNotFoundError as e:
                     log.warning("%s. Either specify a file from which your Stud.IP password can be read "
-                                    "or use `--pwfile -` to enter it using a prompt in the shell." % e)
+                                "or use `--pwfile -` to enter it using a prompt in the shell." % e)
                     return
             args.get_password = lambda: password  # wrap in lambda to prevent printing
 
