@@ -6,26 +6,19 @@ _studip-fuse_ uses the official Stud.IP REST API and authenticates via OAuth1, w
 Password-based login via the standard Stud.IP login (using HTTP Basic Auth `--login-method basic`) or Shibboleth (`--login-method shib`) is also possible.
 All connections to the university servers transporting the login data are made via HTTPS and your credentials will not be copied or distributed in any other way.
 
-This program has been tested on
-- Ubuntu 16.04 using Python 3.5 and pip 8.1.1
-- Fedora 26    using Python 3.6 and pip 9.0.1
+# Installation (on Ubuntu 18.04)
 
-using the Stud.IP instance of University of Passau (https://uni-passau.de/).
-
-
-# Installation (on Ubuntu 16.04)
-
-Install the debian packages `python3` (providing binary `python3` version 3.5) and `python3-pip` (providing binary `pip3` version 8.1.1) on your system via apt:
-```
-$ sudo apt install python3 python3-pip
+Install the debian packages `python3` (providing binary `python3` version &geq; 3.6), `python3-pip` (providing binary `pip3` version &geq; 9) and `fuse` on your system via apt:
+```bash
+sudo apt install python3 python3-pip fuse
 ```
 And install the python package studip-fuse from GitHub for your current user.
-```
-$ pip3 install git+https://github.com/N-Coder/studip-fuse --user
+```bash
+pip3 install git+https://github.com/N-Coder/studip-fuse --user
 ```
 
-Now you can try mounting your Stud.IP files:
-```
+Now you can try mounting your Stud.IP files (optionally pointing `--studip-url` to the `api.php` endpoint of your Stud.IP instance and providing the appropriate [`--login-method`](#Login-Methods)):
+```bash
 mkdir Stud.IP
 studip-fuse mueller123 ~/Stud.IP --pwfile=- --foreground
 ```
@@ -46,12 +39,78 @@ $ fusermount -u ~/Stud.IP
 
 To display file status information emblems and add an "Open on Stud.IP" option menu entry in Nautilus, run the following command to install the plug-in:
 ```
-$ studip-fuse-install-nautilus-plugin                                                                                                                            [dev!][0][15:23]
+$ studip-fuse-install-nautilus-plugin
 Checking requirements...
 Installing studip-fuse Nautilus extension to /home/user/.local/share/nautilus-python/extensions...
 Copying script source code to /home/user/.local/share/nautilus-python/extensions/studip_fuse_nautilus_plugin.py...
 Done installing, please restart Nautilus to enable the plugin.
 ```
+
+# Supported Environments
+
+This program has been tested on
+- Ubuntu 18.04 using Python 3.6.7 and pip 9.0.1
+- Fedora 29    using Python 3.7.2 and pip 18.1
+
+using the Stud.IP instance of University of Passau (https://uni-passau.de/studip) and the Stud.IP Developer Instance (http://develop.studip.de/studip/).
+
+Ubuntu 16.04 is no longer officially supported, because it [only ships python 3.5.2](https://packages.ubuntu.com/xenial-updates/python3.5), but [aiohttp requires &geq; 3.5.3](https://github.com/aio-libs/aiohttp/blob/master/docs/faq.rst#why-is-python-3-5-3-the-lowest-supported-version).
+
+## Login Methods
+
+Currently, three different methods for logging in to Stud.IP are supported via `--login-method`:
+<dl>
+<dt>`basic`</dt>
+<dd>This can be used if your Stud.IP instance uses the built-in authentication system.
+Use this, if your login page looks like <a href="https://develop.studip.de/studip/index.php?again=yes">this</a> 
+and/or the Basic Auth dialog popping up when you open the `api.php` URL accepts your credentials.</dd>
+<dt>`shib`</dt>
+<dd>This can be used if your Stud.IP instance uses Shibboleth Single Sign-On.
+Use this, if your login page looks like <a href="https://studip.uni-passau.de/studip/index.php?again=yes&sso=shib">this</a>.
+Please note that this login method parses the HTML responses of the Shibboleth server that corresponds to `--shib-url`, so things might break.
+<dt>`oauth`</dt>
+<dd>This should be available for any Stud.IP instance, as long as you registered an OAuth application 
+with the administrator of the instance and provide the appropriate `--oauth-client-key`, 
+or your instance provided built-in client keys in <a href="studip_fuse/launcher/oauth_tokens.py">studip_fuse/launcher/oauth_tokens.py</a>.</dd>
+</dl>
+
+## Required Routes
+
+The following routes need to be available from the API defined by `--studip-url`:
+
+- `discovery`,
+- `user`,
+- `studip/settings`,
+- `studip/content_terms_of_use_list`,
+- `studip/file_system/folder_types`,
+- `extern/coursetypes`,
+- `semesters`,
+- `user/:user_id/courses`,
+- `course/:course_id/top_folder`,
+- `folder/:folder_id`,
+- `file/:file_ref_id`,
+- `file/:file_ref_id/download`
+
+The list is also checked at every startup, see [REQUIRED_API_ENDPOINTS in studip_fuse/studipfs/api/session.py](studip_fuse/studipfs/api/session.py).
+If any of the routes is not available and a HTTP error 403 "route not activated" is returned, please contact the administrators of your Stud.IP instance.
+    
+## Installation Options
+
+Any of the following commands should work interchangeably for installing Stud.IP-FUSE
+```bash
+pip3 install --user git+https://github.com/N-Coder/studip-fuse
+pip3 install --user --editable git+https://github.com/N-Coder/studip-fuse
+```
+or after a `git clone` of this repository and `cd`ing to that directory
+```bash
+pip3 install --user .
+pip3 install --user --editable .
+python3 ./setup.py install --user
+python3 ./setup.py develop --user
+```
+If you think anything regarding your installation broke, try running `pip3 uninstall studip-fuse` 
+until the package is no longer found and then reinstalling.
+
 
 # Command-line options
 ```
@@ -119,7 +178,7 @@ FUSE Options:
 
 ## Option format
 Options can either be specified using `--key=value` or `-o key=value`, so the following to lines are identical regarding the option values:
-```
+```bash
 studip-fuse mueller123 /home/user/Stud.IP --allow_root --uid=1000 --gid=1000
 mount -t fuse -o allow_root,uid=1000,gid=1000 "studip-fuse#mueller123" /home/user/Stud.IP
 ```
@@ -228,3 +287,12 @@ For this reason, the following details are design-decisions and no bugs:
 - to update information that has changed online, mount studip-fuse via autofs, so that it will be unmounted automatically once you don't need it anymore. Once you access the folder again, the driver will be started anew and load the new information.
 - to make local changes to the files, use overlayfs to make the read-only studip-fuse filesystem writeable by storing the changes in a separate location ([example config](https://gist.github.com/N-Coder/d5ec5356a12d8ee7a9069188e15f75ce)). This also enables you to delete (i.e. hide) and rename files and folders, while renamed entities will still update their contents when they are changed online.
 - to wait for successful startup, check the file `studip-status.txt` in the `user_data_dir`, which will be appended once the driver completed starting up. See [here](https://github.com/N-Coder/studip-fuse/issues/11) on how to use use `tail` and `grep` for this.
+
+# Alternative Implementations
+
+- [fknorr/studip-client](https://github.com/fknorr/studip-client), [N-Coder/studip-api](https://github.com/N-Coder/studip-api) and [N-Coder/studip-fuse @dev2 Branch (pre version 3)](https://github.com/N-Coder/studip-fuse/tree/dev2)
+- [CollapsedDom/Stud.IP-Client](https://github.com/CollapsedDom/Stud.IP-Client)
+- [rockihack/Stud.IP-FileSync](https://github.com/rockihack/Stud.IP-FileSync)
+- [Sync My Stud.IP (SMSIP)](https://www.flashtek.de/?view=coding.smsip)
+- [woefe/studip-sync](https://github.com/woefe/studip-sync)
+- [Xceron/filecrawl](https://github.com/Xceron/filecrawl)
