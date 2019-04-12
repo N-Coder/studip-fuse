@@ -2,6 +2,8 @@ import logging
 import logging.config
 import os
 
+import more_itertools
+
 import studip_fuse.launcher.aioimpl.asyncio as aioimpl_asyncio
 from studip_fuse.launcher.cmd_util import get_environment, parse_args
 from studip_fuse.launcher.fuse import FUSE, fuse_get_context
@@ -9,6 +11,16 @@ from studip_fuse.launcher.log_utils import configure_logging
 from studip_fuse.studipfs.fuse_ops import FUSEView, log_status
 
 log = logging.getLogger(__name__)
+
+FUSE_ERROR_CODES = {  # https://libfuse.github.io/doxygen/fuse_8h.html#ac99b844cee7aaa8fb4e35df5b5488d82
+    1: "Invalid option arguments",
+    2: "No mount point specified",
+    3: "FUSE setup failed",
+    4: "Mounting failed",
+    5: "Failed to daemonize (detach from session)",
+    6: "Failed to set up signal handlers",
+    7: "An error occured during the life of the file system",
+}
 
 
 def login_oauth_args(args):
@@ -60,6 +72,7 @@ def login_oauth_args(args):
     args.get_oauth_args = lambda: oauth_client.__dict__
 
 
+
 def main():
     configure_logging()
     args, fuse_args = parse_args()
@@ -99,7 +112,17 @@ def main():
         log.debug("Going to mount at %s (uid=%s, gid=%s, pid=%s, python pid=%s)", args.mount,
                   *fuse_get_context(), os.getpid())
         # This calls fork if args.foreground == False (https://bugs.python.org/issue21998)
-        FUSE(fuse_ops, args.mount, debug=fuse_args.pop("debug_fuse"), **fuse_args)
+        try:
+            FUSE(fuse_ops, args.mount, debug=fuse_args.pop("debug_fuse"), **fuse_args)
+        except RuntimeError as e:
+            if more_itertools.first(e.args, None) in FUSE_ERROR_CODES:
+                msg = FUSE_ERROR_CODES[e.args[0]]
+                if e.args[0] == 1:
+                    msg += ". Please check whether the mountpoint you specified is an empty directory or another instance of studip-fuse is using it"
+                msg += ". Please check stderr for details."
+                raise RuntimeError(msg) from e
+            else:
+                raise
     except SystemExit:
         pass
     except:

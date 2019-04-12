@@ -6,6 +6,8 @@ from datetime import datetime
 from typing import AsyncGenerator, List, Mapping, Tuple
 
 import attr
+from aiohttp import ClientResponseError
+from aiohttp.web_exceptions import HTTPClientError, HTTPForbidden, HTTPUnauthorized
 from async_generator import async_generator, yield_
 from more_itertools import one
 from pyrsistent import freeze, pvector as FrozenList
@@ -135,17 +137,28 @@ class StudIPSession(object):
         })
 
     async def check_login(self, username=None):
-        user_data = await self.get_studip_json("user")
-        if username:
-            assert user_data["username"] == username
+        try:
+            user_data = await self.get_studip_json("user")
+            if username and user_data["username"] != username:
+                raise RuntimeError("Requested to login as %s, but this session belongs to %s. "
+                                   "Did you use the wrong OAuth session token?" % (username, user_data["username"]))
 
-        discovery = await self.get_studip_json("discovery")
-        for path in REQUIRED_API_ENDPOINTS:
-            path = "/" + path
-            assert path in discovery
-            assert "get" in discovery[path]
+            discovery = await self.get_studip_json("discovery")
+            for path in REQUIRED_API_ENDPOINTS:
+                path = "/" + path
+                if path not in discovery or "get" not in discovery[path]:
+                    raise RuntimeError("Required API route %s is not available on your Stud.IP instance at %s."
+                                       % (path, self.studip_base))
 
-        return user_data
+            return user_data
+        except (HTTPClientError, ClientResponseError) as e:
+            if e.status == HTTPUnauthorized.status_code:
+                raise RuntimeError("Login failed, please check your credentials and try again.") from e
+            elif e.status == HTTPForbidden.status_code:
+                raise RuntimeError("The required Stud.IP API was disabled by the administrator of your instance at %s."
+                                   % self.studip_base) from e
+            else:
+                raise
 
     async def prefetch_globals(self):
         self.studip_settings = await self.get_studip_json("studip/settings")
