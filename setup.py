@@ -109,7 +109,7 @@ if __name__ == "__main__":
             "Programming Language :: Python :: 3.8",
             "Topic :: System :: Filesystems",
         ],
-        python_requires='>=3.5',
+        python_requires='>=3.5.3',  # https://github.com/aio-libs/aiohttp/blob/master/docs/faq.rst#why-is-python-3-5-3-the-lowest-supported-version
         version=version,
         meta=install_info(),
         description="Python FUSE drive for courses and files available through the Stud.IP University Access Portal",
