@@ -14,19 +14,21 @@ from studip_fuse.launcher.cmd_util import get_environment
 from studip_fuse.studipfs.api.aiointerface import HTTPClient
 from studip_fuse.studipfs.api.session import StudIPSession
 from studip_fuse.studipfs.fuse_ops import LoopSetupResult
-from studip_fuse.studipfs.path.studip_path import StudIPPath
 
 log = logging.getLogger(__name__)
 
 
-def setup_asyncio_loop(args):
+def setup_asyncio_loop(args, session_context_manager=None):
+    if not session_context_manager:
+        session_context_manager = session_context
+
     def start(future: concurrent.futures.Future):
         with ExitStack() as stack:
             future = stack.enter_context(future_context(future))
             check_cancelled(future)
             loop = stack.enter_context(loop_context(args))  # type: AbstractEventLoop
             check_cancelled(future)
-            root_rp = stack.enter_context(session_context(args, loop, future))
+            root_rp = stack.enter_context(session_context_manager(args, loop, future))
             check_cancelled(future)
 
             log.info("Loop and session ready, sending result back to main thread")
@@ -97,10 +99,11 @@ def loop_context(args):
 
 
 @contextmanager
-def session_context(args, loop, future: concurrent.futures.Future, ioimpl=None,
-                    vpathimpl=StudIPPath, rpathimpl=None):  # TODO allow selecting all these classes
+def session_context(args, loop, future: concurrent.futures.Future, *, ioimpl=None, vpathimpl=None, rpathimpl=None):
     if not ioimpl:
         import studip_fuse.launcher.aioimpl.asyncio as ioimpl
+    if not vpathimpl:
+        from studip_fuse.studipfs.path.studip_path import StudIPPath as vpathimpl
     if not rpathimpl:
         from studip_fuse.launcher.aioimpl.asyncio.alru_realpath import CachingRealPath as rpathimpl
 
