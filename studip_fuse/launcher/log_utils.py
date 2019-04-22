@@ -5,7 +5,6 @@ import os
 import sys
 import threading
 
-import appdirs
 import pkg_resources
 import yaml
 
@@ -41,10 +40,8 @@ class LoggerWriter:
             self.old.flush()
 
 
-def configure_logging():
-    dirs = appdirs.AppDirs("Stud.IP-Fuse", False)
-    os.makedirs(dirs.user_data_dir, exist_ok=True)
-
+def configure_logging(dirs):
+    os.makedirs(dirs.user_data_dir, exist_ok=True)  # must exist for log files
     logging_path = os.path.join(dirs.user_config_dir, "studip-logging-config.yaml")
     if os.path.isfile(logging_path):
         with open(logging_path, "rb") as f:

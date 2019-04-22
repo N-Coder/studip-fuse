@@ -2,6 +2,7 @@ import logging
 import logging.config
 import os
 
+import appdirs
 import more_itertools
 
 import studip_fuse.launcher.aioimpl.asyncio as aioimpl_asyncio
@@ -73,8 +74,9 @@ def login_oauth_args(args):
 
 
 def main(argv=None):
-    configure_logging()
-    args, fuse_args = parse_args(argv)
+    dirs = appdirs.AppDirs(appname="Stud.IP-Fuse", appauthor=False)  # disable author/company folder on windows
+    configure_logging(dirs)
+    args, fuse_args = parse_args(dirs, argv)
     try:
         if not args.debug_logging:
             logging.root.setLevel(logging.INFO)

@@ -2,7 +2,6 @@ import argparse as argparse
 import logging
 import os
 
-import appdirs
 from more_itertools import flatten
 from yarl import URL
 
@@ -11,9 +10,7 @@ from studip_fuse import __version__ as prog_version
 log = logging.getLogger(__name__)
 
 
-def parse_args(argv=None):
-    dirs = appdirs.AppDirs("Stud.IP-Fuse", False)
-
+def parse_args(dirs, argv=None):
     opts_parser = argparse.ArgumentParser(add_help=False)
     opts_parser.add_argument("-o", help="FUSE-like options", nargs="+", action=StoreNameValuePair(opts_parser))
     opts_parser.add_argument("-d", "--debug", help="turn on all debugging options", action="store_true")
