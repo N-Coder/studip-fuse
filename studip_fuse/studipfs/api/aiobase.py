@@ -9,6 +9,8 @@ from yarl import URL
 
 from studip_fuse.studipfs.api.aiointerface import Download, HTTPClient
 
+__all__ = ["BaseHTTPClient"]
+
 
 @attr.s()
 class BaseHTTPClient(HTTPClient):

@@ -15,6 +15,7 @@ from yarl import URL
 
 from studip_fuse.studipfs.api.aiointerface import FrozenDict, HTTPClient
 
+__all__ = ["REQUIRED_API_ENDPOINTS", "OAuth1URLs", "DEFAULT_OAUTH1_URLS", "StudIPSession"]
 REQUIRED_API_ENDPOINTS = [
     "discovery",
     "user",
@@ -86,8 +87,8 @@ def append_base_url_slash(value):
 
 
 OAuth1URLs = namedtuple("OAuthURLs", ["access_token", "authorize", "request_token"])
-oauth1_prefix = "../dispatch.php/api/oauth/"
-default_oauth1_urls = OAuth1URLs(oauth1_prefix + "access_token", oauth1_prefix + "authorize", oauth1_prefix + "request_token")
+DEFAULT_OAUTH1_PREFIX = "../dispatch.php/api/oauth/"
+DEFAULT_OAUTH1_URLS = OAuth1URLs(DEFAULT_OAUTH1_PREFIX + "access_token", DEFAULT_OAUTH1_PREFIX + "authorize", DEFAULT_OAUTH1_PREFIX + "request_token")
 
 
 # Old docs: https://docs.studip.de/develop/Entwickler/RESTAPI
@@ -98,7 +99,7 @@ class StudIPSession(object):
     studip_base = attr.ib(converter=append_base_url_slash)  # type: URL
     http = attr.ib()  # type: HTTPClient
 
-    rel_oauth1_urls = attr.ib(default=default_oauth1_urls)  # type: OAuth1URLs
+    rel_oauth1_urls = attr.ib(default=DEFAULT_OAUTH1_URLS)  # type: OAuth1URLs
 
     studip_settings = attr.ib(init=False, default=None)  # type: FrozenDict
     studip_course_type = attr.ib(init=False)  # type: FrozenDict # map for [int(id), str(id) and name] -> {'id': 21, 'name': 'Workshop', 'class': '3'}

@@ -12,6 +12,7 @@ from pyrsistent import freeze
 from studip_fuse.avfs.path_util import normalize_path, path_head, path_name, path_tail
 from studip_fuse.avfs.virtual_path import VirtualPath
 
+__all__ = ["RealPath"]
 log = logging.getLogger(__name__)
 
 

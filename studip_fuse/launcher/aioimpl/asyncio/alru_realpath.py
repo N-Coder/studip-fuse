@@ -6,6 +6,8 @@ from studip_fuse.avfs.real_path import RealPath
 
 cache = alru_cache(cache_exceptions=False)
 
+__all__ = ["CachingRealPath"]
+
 
 def peek_cache(cached_func, *fn_args, **fn_kwargs):
     from functools import _make_key

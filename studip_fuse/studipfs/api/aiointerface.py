@@ -7,6 +7,7 @@ import attr
 from pyrsistent import pmap as FrozenDict
 from yarl import URL
 
+__all__ = ["Pipeline", "HTTPResponse", "HTTPClient", "Download", "T"]
 T = TypeVar('T')
 
 

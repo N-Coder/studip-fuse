@@ -18,6 +18,7 @@ from studip_fuse.avfs.real_path import RealPath
 from studip_fuse.launcher.fuse import FuseOSError, fuse_get_context
 from studip_fuse.studipfs.api.aiointerface import Download
 
+__all__ = ["LoopSetupResult", "FUSEView", "log_status", "status_queue"]
 ENOATTR = getattr(errno, "ENOATTR", getattr(errno, "ENODATA"))
 
 log = logging.getLogger(__name__)
