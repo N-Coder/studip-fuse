@@ -11,7 +11,7 @@ from studip_fuse import __version__ as prog_version
 log = logging.getLogger(__name__)
 
 
-def parse_args():
+def parse_args(argv=None):
     dirs = appdirs.AppDirs("Stud.IP-Fuse", False)
 
     opts_parser = argparse.ArgumentParser(add_help=False)
@@ -68,7 +68,7 @@ def parse_args():
     parser.add_argument("mount", help="path to mount point", type=lambda x: os.path.normpath(os.path.expanduser(x)))
     parser.add_argument("-V", "--version", action="version", version="%(prog)s " + prog_version)
 
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
     if args.debug:
         args.debug_logging = True

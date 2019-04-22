@@ -72,10 +72,9 @@ def login_oauth_args(args):
     args.get_oauth_args = lambda: oauth_client.__dict__
 
 
-
-def main():
+def main(argv=None):
     configure_logging()
-    args, fuse_args = parse_args()
+    args, fuse_args = parse_args(argv)
     try:
         if not args.debug_logging:
             logging.root.setLevel(logging.INFO)
