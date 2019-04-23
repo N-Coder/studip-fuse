@@ -1,5 +1,6 @@
 import logging
 from abc import ABC, abstractmethod
+from io import FileIO
 from string import Formatter
 from typing import Any, Callable, Dict, Iterable, List, NewType, Optional, Set, Tuple, Union
 
@@ -143,7 +144,7 @@ class VirtualPath(ABC):
         pass
 
     @abstractmethod
-    async def open_file(self, flags) -> Any:
+    async def open_file(self, flags) -> FileIO:
         pass
 
     @abstractmethod

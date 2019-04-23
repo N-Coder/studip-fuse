@@ -5,6 +5,7 @@ import re
 import warnings
 from datetime import datetime
 from enum import IntEnum
+from io import FileIO
 from stat import S_IFDIR, S_IFREG, S_IRGRP, S_IROTH, S_IRUSR
 from typing import Optional, Tuple, Type
 
@@ -182,16 +183,16 @@ class StudIPPath(FormatTokenGeneratorVirtualPath):
             pass
         else:
             try:
-                download = await self.open_file()
+                download = await self.session.retrieve_file(self._file)
                 if download.is_loading:
                     xattrs["contents-status"] = "pending"
                     xattrs["contents-exception"] = "InvalidStateError: operation is not complete yet"
                 elif download.is_completed:
                     xattrs["contents-status"] = "available"
                     xattrs["contents-exception"] = ""
-                elif download.exception():
+                elif download.exception:
                     xattrs["contents-status"] = "failed"
-                    xattrs["contents-exception"] = download.exception()
+                    xattrs["contents-exception"] = download.exception
                 else:
                     xattrs["contents-status"] = "unknown"
                     xattrs["contents-exception"] = "InvalidStateError: operation was not started yet"
@@ -223,10 +224,12 @@ class StudIPPath(FormatTokenGeneratorVirtualPath):
         })
         return xattrs
 
-    async def open_file(self, flags=None) -> Download:
+    async def open_file(self, flags=None) -> FileIO:
         await self.access(flags)
         assert not self.is_folder, "open_file called on folder %s" % self
-        return await self.session.retrieve_file(self._file)
+        download = await self.session.retrieve_file(self._file)
+        await download.start_loading()
+        return download.open_sync(flags)
 
     # public properties  ###############################################################################################
 

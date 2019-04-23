@@ -7,6 +7,7 @@ import os
 import pprint
 import threading
 from collections import defaultdict
+from io import FileIO
 from threading import Lock, Thread
 from typing import Callable, Dict, List, NamedTuple
 
@@ -16,7 +17,6 @@ from attr import Factory
 from studip_fuse.avfs.path_util import path_name
 from studip_fuse.avfs.real_path import RealPath
 from studip_fuse.launcher.fuse import FuseOSError, fuse_get_context
-from studip_fuse.studipfs.api.aiointerface import Download
 
 __all__ = ["LoopSetupResult", "FUSEView", "log_status", "status_queue"]
 ENOATTR = getattr(errno, "ENOATTR", getattr(errno, "ENODATA"))
@@ -80,7 +80,7 @@ class FUSEView(object):
     loop_run_fn = attr.ib(init=False, default=None)
     root_rp = attr.ib(init=False, default=None)  # type: RealPath
 
-    open_files = attr.ib(init=False, default=Factory(dict))  # type: Dict[int, Download]
+    open_files = attr.ib(init=False, default=Factory(dict))  # type: Dict[int, FileIO]
     read_locks = attr.ib(init=False, repr=False, default=Factory(lambda: ThreadSafeDefaultDict(Lock)))
 
     @staticmethod
@@ -199,32 +199,26 @@ class FUSEView(object):
         elif resolved_real_file.is_folder:
             raise FuseOSError(errno.EISDIR)
         else:
-            download = self.loop_run_fn(resolved_real_file.open_file, flags)  # type: Download
-            self.loop_run_fn(download.start_loading)
-            if os.name == 'nt' and not flags & getattr(os, "O_TEXT", 16384):
-                flags |= os.O_BINARY
-            fileno = os.open(download.local_path, flags)
-            self.open_files[fileno] = download
-            return fileno
+            file = self.loop_run_fn(resolved_real_file.open_file, flags)
+            self.open_files[file.fileno()] = file
+            return file.fileno()
 
     def read(self, path, length, offset, fh):
-        download = self.open_files.get(fh, None)
-        if download:
-            self.loop_run_fn(download.await_readable, offset, length)
-
+        file = self.open_files[fh]
         with self.read_locks[fh]:
-            os.lseek(fh, offset, os.SEEK_SET)
-            return os.read(fh, length)
+            file.seek(offset, os.SEEK_SET)
+            return file.read(length)
 
     def flush(self, path, fh):
-        return os.fsync(fh)
+        self.open_files[fh].flush()
 
     def fsync(self, path, fdatasync, fh):
-        return self.flush(path, fh)
+        self.open_files[fh].flush()
 
     def release(self, path, fh):
-        self.open_files.pop(fh, None)
-        return os.close(fh)
+        file = self.open_files.pop(fh, None)
+        if file:
+            file.close()
 
 
 class ThreadSafeDefaultDict(defaultdict):

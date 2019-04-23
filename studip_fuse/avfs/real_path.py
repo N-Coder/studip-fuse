@@ -2,6 +2,7 @@ import asyncio
 import logging
 import os
 from collections import defaultdict
+from io import FileIO
 from typing import Dict, List, Optional, Set
 
 import attr
@@ -72,8 +73,9 @@ class RealPath(object):
             xattrs.update(await vp.getxattr())
         return xattrs
 
-    async def open_file(self, flags):
-        return await one(self.generating_vps).open_file(flags)
+    async def open_file(self, flags) -> FileIO:
+        vp = one(self.generating_vps)  # type: VirtualPath
+        return await vp.open_file(flags)
 
     @classmethod
     def with_middleware(cls, resolve_annotation, list_contents_annotation, name="GenericMiddlewareRealPath"):

@@ -1,14 +1,17 @@
 import asyncio
 import enum
 import logging
+import operator
 import os
 import re
 import time
 import warnings
 from asyncio import CancelledError, Future
 from datetime import datetime
+from functools import reduce
+from io import FileIO, UnsupportedOperation
 from stat import S_ISREG
-from typing import Callable, Union
+from typing import Callable, Optional, Union
 
 import aiofiles
 import aiofiles.os
@@ -23,7 +26,7 @@ from oauthlib.oauth1 import Client as OAuth1Client
 from pyrsistent import freeze
 from yarl import URL
 
-from studip_fuse.studipfs.api.aiobase import BaseHTTPClient
+from studip_fuse.studipfs.api.aiobase import BaseDownload, BaseHTTPClient
 from studip_fuse.studipfs.api.aiointerface import Download
 
 log = logging.getLogger(__name__)
@@ -128,7 +131,7 @@ class DownloadState(enum.Enum):
 
 
 @attr.s()
-class AiohttpDownload(Download):
+class AiohttpDownload(BaseDownload):
     http_client = attr.ib()  # type: AiohttpClient
 
     state = attr.ib(init=False, default=DownloadState.EMPTY)  # type: DownloadState
@@ -163,11 +166,12 @@ class AiohttpDownload(Download):
     @property
     def is_completed(self) -> bool:
         if self.state == DownloadState.DONE:
-            assert not self.exception()
+            assert not self.exception
             return True
         else:
             return False
 
+    @property
     def exception(self):
         if self.future and self.future.done():
             try:
@@ -179,6 +183,7 @@ class AiohttpDownload(Download):
             else:
                 assert self.state == DownloadState.DONE
             return exc
+        return None
 
     async def aclose(self, exc_type=None, exc_val=None, exc_tb=None):
         if self.future:
@@ -214,7 +219,7 @@ class AiohttpDownload(Download):
                 await async_utime(self.local_path, (timestamp, timestamp))  # FIXME mtime is not stable on Windows
             self.state = DownloadState.DONE
 
-    async def start_loading(self):
+    async def start_loading(self, offset=0, length=-1):
         if self.is_loading:
             return
         if self.is_completed:
@@ -243,8 +248,26 @@ class AiohttpDownload(Download):
                 # and reliably cleaned up by self.aclose() right after the background Task completed.
                 loop=self.loop)
 
-    async def await_readable(self, offset=0, length=-1):
+    def readable_bytes(self, offset=0) -> int:
+        if self.is_completed:
+            return self.total_length - offset
+        else:
+            return 0  # TODO get current progress
+
+    async def await_readable(self, offset=0, length=-1, start_loading=False):
+        if start_loading:
+            await self.start_loading(offset, length)
         await self.aclose()  # TODO would be sufficient to only wait for requested range
+
+    def open_sync(self, req_flags=0) -> FileIO:
+        def log_flags_open(file, act_flags):
+            if req_flags and req_flags != act_flags:
+                warnings.warn("Wanted to open file with flags %s, but we can only open it with %s"
+                              % (os_open_flags2str(req_flags), os_open_flags2str(act_flags)))
+            return os.open(file, act_flags, 0o666)
+
+        # noinspection PyTypeChecker
+        return DownloadAwareReader(open(self.local_path, mode="rb", opener=log_flags_open), self)
 
     async def is_cached_locally(self):
         try:
@@ -286,3 +309,47 @@ class AiohttpDownload(Download):
             assert self.total_length == int(total_length), \
                 "Was told to load Stud.IP file with size %s from HTTP download reporting size %s" % \
                 (self.total_length, total_length)
+
+
+OS_OPEN_FLAGS = {k: v for (k, v) in os.__dict__.items() if k.startswith("O_") and isinstance(v, int)}
+OS_OPEN_FLAGS_MASK = reduce(operator.or_, OS_OPEN_FLAGS.values())
+
+
+def os_open_flags2str(flags):
+    names = [k for (k, v) in OS_OPEN_FLAGS.items() if v & flags]
+    unknown = flags & (~OS_OPEN_FLAGS_MASK)
+    if unknown:
+        names.append(str(unknown))
+    return "%s (%s)" % (names, flags)
+
+
+@attr.s()
+class DownloadAwareReader(object):
+    raw = attr.ib()  # type: FileIO
+    download = attr.ib()  # type: AiohttpDownload
+
+    SUPPORTED_OPERATIONS = ["seek", "tell", "flush", "close", "seekable", "readable", "writable", "closed", "fileno", "isatty", "name", "mode"]
+
+    def __getattr__(self, name):
+        if name in self.SUPPORTED_OPERATIONS:
+            return getattr(self.raw, name)
+        else:
+            raise UnsupportedOperation("%s.%s() not supported" % (self.__class__.__name__, name))
+
+    def ensure_readable(self, length):
+        pos = self.tell()
+        if self.download.is_readable(pos, length):
+            return
+        return self.download.async_result(self.download.await_readable, pos, length, start_loading=True)
+
+    def readall(self) -> bytes:
+        self.ensure_readable(self.download.total_length - self.tell())
+        return self.raw.readall()
+
+    def readinto(self, b: bytearray) -> Optional[int]:
+        self.ensure_readable(len(b))
+        return self.raw.readinto(b)
+
+    def read(self, size: int) -> Optional[bytes]:
+        self.ensure_readable(size)
+        return self.raw.read(size)
