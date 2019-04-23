@@ -18,6 +18,7 @@ from aiohttp import ClientRequest, hdrs, helpers
 from async_exit_stack import AsyncExitStack
 from async_generator import async_generator, asynccontextmanager, yield_
 from async_lru import alru_cache
+from cached_property import cached_property
 from oauthlib.oauth1 import Client as OAuth1Client
 from pyrsistent import freeze
 from yarl import URL
@@ -140,6 +141,12 @@ class AiohttpDownload(Download):
     @property
     def loop(self):
         return self.http_client.loop
+
+    @cached_property
+    def async_result(self):
+        from studip_fuse.launcher.aioimpl.asyncio.main_loop import async_result_wrapper
+
+        return async_result_wrapper(self.loop)
 
     @property
     def is_loading(self) -> bool:
