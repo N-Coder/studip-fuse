@@ -1,5 +1,5 @@
 import os
-from abc import abstractmethod
+from abc import abstractmethod, ABC
 from datetime import datetime
 from typing import Dict, Optional
 
@@ -59,3 +59,22 @@ class BaseHTTPClient(HTTPClient):
                 form_url = input_elem.find_parent("form").attrs['action']
 
         return form_url, form_data
+
+
+class BaseDownload(Download, ABC):
+    def open_async(self, *args, **kwargs):
+        from aiofiles.base import AiofilesContextManager
+
+        return AiofilesContextManager(self.__open_async(*args, **kwargs))
+
+    async def __open_async(self, flags, loop=None, executor=None):
+        import asyncio
+        import functools
+
+        from aiofiles.threadpool import AsyncFileIO
+
+        if loop is None:
+            loop = asyncio.get_event_loop()
+        file = await loop.run_in_executor(
+            executor=None, func=functools.partial(self.open_sync, flags))
+        return AsyncFileIO(file, loop, executor)

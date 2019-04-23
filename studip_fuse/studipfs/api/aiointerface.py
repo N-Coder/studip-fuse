@@ -2,10 +2,12 @@ import warnings
 from abc import ABC, abstractmethod
 from collections import namedtuple
 from datetime import datetime
+from io import FileIO
 from queue import Queue
 from typing import Any, Callable, Coroutine, Dict, Generic, List, NamedTuple, Optional, Tuple, TypeVar, Union
 
 import attr
+from aiofiles.threadpool import AsyncFileIO
 from more_itertools import one
 from pyrsistent import pmap as FrozenDict
 from typing_extensions import AsyncContextManager, AsyncIterator
@@ -107,16 +109,35 @@ class Download(ABC):
     def is_completed(self) -> bool:
         return False
 
+    @property
     @abstractmethod
     def exception(self) -> BaseException:
         pass
 
     @abstractmethod
-    async def start_loading(self):
+    async def start_loading(self, offset=0, length=-1):
+        pass
+
+    def is_readable(self, offset=0, length=-1) -> bool:
+        if length < 0:
+            length = self.total_length - offset
+        return self.readable_bytes(offset) >= length
+
+    @abstractmethod
+    def readable_bytes(self, offset=0) -> int:
         pass
 
     @abstractmethod
-    async def await_readable(self, offset=0, length=-1):
+    async def await_readable(self, offset=0, length=-1, start_loading=False):
+        pass
+
+    @abstractmethod
+    def open_sync(self, flags=0) -> FileIO:
+        """blockingly opens another view into the file"""
+        pass
+
+    @abstractmethod
+    async def open_async(self, flags=0, loop=None, executor=None) -> AsyncFileIO:
         pass
 
 
