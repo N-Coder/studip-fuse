@@ -10,7 +10,8 @@ from oauthlib.oauth1 import Client as OAuth1Client
 from yarl import URL
 
 from studip_fuse.launcher.cmd_util import get_environment, get_version
-from studip_fuse.studipfs.api.session import StudIPSession
+from studip_fuse.studipfs.api.session import StudIPAPISession
+from studip_fuse.studipfs.api.aiointerface import StudIPSession
 
 OAUTH_CALLBACK_PORT = 17548
 
@@ -238,7 +239,7 @@ async def obtain_access_token_sessionless(oauth1_client: OAuth1Client = None,
         auth=oauth1_client
     )  # will be aentered/aexited by http_client
     async with HTTPClient(http_session=client_session, storage_dir=None) as http_client:
-        studip_session = StudIPSession(studip_base=studip_url, http=http_client)
+        studip_session = StudIPAPISession(studip_base=studip_url, http=http_client)
         return await obtain_access_token(studip_session, oauth1_client, port=port, open_browser=open_browser)
 
 

@@ -12,7 +12,6 @@ from async_exit_stack import AsyncExitStack
 
 from studip_fuse.launcher.cmd_util import get_environment
 from studip_fuse.studipfs.api.aiointerface import HTTPClient
-from studip_fuse.studipfs.api.session import StudIPSession
 from studip_fuse.studipfs.fuse_ops import LoopSetupResult
 
 log = logging.getLogger(__name__)
@@ -99,13 +98,15 @@ def loop_context(args):
 
 
 @contextmanager
-def session_context(args, loop, future: concurrent.futures.Future, *, ioimpl=None, vpathimpl=None, rpathimpl=None):
+def session_context(args, loop, future: concurrent.futures.Future, *, ioimpl=None, vpathimpl=None, rpathimpl=None, sessimpl=None):
     if not ioimpl:
         import studip_fuse.launcher.aioimpl.asyncio as ioimpl
     if not vpathimpl:
         from studip_fuse.studipfs.path.studip_path import StudIPPath as vpathimpl
     if not rpathimpl:
         from studip_fuse.launcher.aioimpl.asyncio.alru_realpath import CachingRealPath as rpathimpl
+    if not sessimpl:
+        from studip_fuse.studipfs.api.session import StudIPAPISession as sessimpl
 
     stack = AsyncExitStack()
 
@@ -118,7 +119,7 @@ def session_context(args, loop, future: concurrent.futures.Future, *, ioimpl=Non
         http_client = await stack.enter_async_context(
             ioimpl.HTTPClient(http_session=client_session, storage_dir=args.cache_dir)
         )  # type: HTTPClient
-        session = StudIPSession(studip_base=args.studip_url, http=http_client)
+        session = sessimpl(studip_base=args.studip_url, http=http_client)
         check_cancelled(future)
 
         log.info("Logging in via %s...", args.login_method)

@@ -1,13 +1,17 @@
+import warnings
 from abc import ABC, abstractmethod
+from collections import namedtuple
 from datetime import datetime
 from queue import Queue
-from typing import Any, AsyncContextManager, AsyncGenerator, Callable, Coroutine, Dict, Generic, NamedTuple, Optional, TypeVar, Union
+from typing import Any, AsyncContextManager, AsyncGenerator, Callable, Coroutine, Dict, Generic, NamedTuple, Optional, TypeVar, Union, Tuple, List
 
 import attr
+from more_itertools import one
 from pyrsistent import pmap as FrozenDict
 from yarl import URL
 
-__all__ = ["Pipeline", "HTTPResponse", "HTTPClient", "Download", "T"]
+__all__ = ["Pipeline", "HTTPResponse", "HTTPClient", "Download", "T", "StudIPSession"] + \
+          ["OAuth1URLs", "DEFAULT_OAUTH1_URLS"]
 T = TypeVar('T')
 
 
@@ -45,6 +49,10 @@ class HTTPClient(AsyncContextManager, ABC):
 
     @abstractmethod
     async def get_json(self, url) -> FrozenDict:
+        pass
+
+    @abstractmethod
+    async def get_text(self, url) -> str:
         pass
 
     # auth = (Method/Strategy x IO Interface x Endpoint URLs x User Credentials)
@@ -95,4 +103,91 @@ class Download(ABC):
 
     @abstractmethod
     async def await_readable(self, offset=0, length=-1):
+        pass
+
+
+def append_base_url_slash(value):
+    value = URL(value)
+    if not value.path.endswith("/"):
+        warnings.warn("StudIP API %s must end with a slash. Appending '/' to make path concatenation work correctly.", repr(value))
+        value = value.with_path(value.path + "/")
+    return value
+
+
+OAuth1URLs = namedtuple("OAuthURLs", ["access_token", "authorize", "request_token"])
+DEFAULT_OAUTH1_PREFIX = "../dispatch.php/api/oauth/"
+DEFAULT_OAUTH1_URLS = OAuth1URLs(DEFAULT_OAUTH1_PREFIX + "access_token", DEFAULT_OAUTH1_PREFIX + "authorize", DEFAULT_OAUTH1_PREFIX + "request_token")
+
+
+@attr.s(hash=False, str=False, repr=False)
+class StudIPSession(ABC):
+    studip_base = attr.ib(converter=append_base_url_slash)  # type: URL
+    http = attr.ib()  # type: HTTPClient
+
+    rel_oauth1_urls = attr.ib(default=DEFAULT_OAUTH1_URLS)  # type: OAuth1URLs
+
+    def studip_url(self, url):
+        return self.studip_base.join(URL(url))
+
+    @property
+    def oauth1_urls(self) -> OAuth1URLs:
+        return OAuth1URLs(*(self.studip_url(v) for v in self.rel_oauth1_urls))
+
+    async def get_version(self):
+        from bs4 import BeautifulSoup
+        soup = BeautifulSoup(await self.http.get_text(self.studip_url("/studip/dispatch.php/siteinfo/")), 'lxml')
+        return str(one(soup.find_all(string="Version:")).parent.next_sibling).strip()
+
+    @classmethod
+    def with_middleware(cls, async_annotation, agen_annotation, download_annotation, name="GenericMiddlewareStudIPSession"):
+        return type(name, (cls,), {
+            "get_user": async_annotation(cls.get_user),
+            "get_course_root_folder": async_annotation(cls.get_course_root_folder),
+            "get_folder_details": async_annotation(cls.get_folder_details),
+            "get_file_details": async_annotation(cls.get_file_details),
+
+            "get_semesters": agen_annotation(cls.get_semesters),
+            "get_courses": agen_annotation(cls.get_courses),
+
+            "retrieve_file": download_annotation(cls.retrieve_file),
+        })
+
+    @abstractmethod
+    async def check_login(self, username):
+        pass
+
+    @abstractmethod
+    async def prefetch_globals(self):
+        pass
+
+    @abstractmethod
+    async def get_instance_name(self) -> str:
+        pass
+
+    @abstractmethod
+    async def get_user(self) -> FrozenDict:
+        pass
+
+    @abstractmethod
+    def get_semesters(self) -> AsyncGenerator[FrozenDict, None]:
+        pass
+
+    @abstractmethod
+    def get_courses(self, semester) -> AsyncGenerator[FrozenDict, None]:
+        pass
+
+    @abstractmethod
+    async def get_course_root_folder(self, course) -> Tuple[FrozenDict, List, List]:
+        pass
+
+    @abstractmethod
+    async def get_folder_details(self, parent) -> Tuple[FrozenDict, List, List]:
+        pass
+
+    @abstractmethod
+    async def get_file_details(self, parent) -> FrozenDict:
+        pass
+
+    @abstractmethod
+    async def retrieve_file(self, file) -> Download:
         pass
