@@ -17,6 +17,26 @@ from studip_fuse.studipfs.fuse_ops import LoopSetupResult
 log = logging.getLogger(__name__)
 
 
+def async_result_wrapper(loop=None):
+    def async_result(corofn, *args, **kwargs):
+        nonlocal loop
+        if inspect.iscoroutine(corofn):
+            raise TypeError("expected a coroutinefunction, but got an already called coroutine %s" % corofn)
+        if not inspect.iscoroutinefunction(corofn):
+            raise TypeError("expected a coroutinefunction, but got %s %s" % (type(corofn), corofn))
+        if not loop:
+            loop = asyncio.get_event_loop()
+        if not loop.is_running():
+            warnings.warn("Submitting coroutinefunction %s to paused main asyncio loop %s, this shouldn't happen",
+                          corofn, loop)
+        return asyncio.run_coroutine_threadsafe(corofn(*args, **kwargs), loop).result()
+
+    return async_result
+
+
+async_result = async_result_wrapper(None)
+
+
 def setup_asyncio_loop(args, session_context_manager=None):
     if not session_context_manager:
         session_context_manager = session_context
@@ -32,17 +52,9 @@ def setup_asyncio_loop(args, session_context_manager=None):
 
             log.info("Loop and session ready, sending result back to main thread")
 
-            def async_result(corofn, *args, **kwargs):
-                assert not inspect.iscoroutine(corofn)
-                assert inspect.iscoroutinefunction(corofn)
-                if not loop.is_running():
-                    warnings.warn("Submitting coroutinefunction %s to paused main asyncio loop %s, this shouldn't happen",
-                                  corofn, loop)
-                return asyncio.run_coroutine_threadsafe(corofn(*args, **kwargs), loop).result()
-
             future.set_result(LoopSetupResult(
                 loop_stop_fn=lambda: loop.call_soon_threadsafe(loop.stop),
-                loop_run_fn=async_result,
+                loop_run_fn=async_result_wrapper(loop),
                 root_rp=root_rp))
 
             log.info("Running asyncio event loop...")
