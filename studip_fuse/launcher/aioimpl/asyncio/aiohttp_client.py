@@ -76,6 +76,11 @@ class AiohttpClient(BaseHTTPClient):
             resp.raise_for_status()
             return freeze(await resp.json())
 
+    async def get_text(self, url):
+        async with self.http_session.get(url) as resp:
+            resp.raise_for_status()
+            return await resp.text()
+
     async def retrieve_missing(self, uid, url, overwrite_created, expected_size):
         download = AiohttpDownload(uid, url, self.uid_to_path(uid), expected_size, overwrite_created, self)
         self.exit_stack.push_async_exit(download.aclose)

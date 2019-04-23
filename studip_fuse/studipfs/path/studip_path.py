@@ -15,8 +15,7 @@ from cached_property import cached_property
 from studip_fuse.avfs.path_util import join_path, path_name
 from studip_fuse.avfs.virtual_path import FormatTokenGeneratorVirtualPath, VirtualPath
 from studip_fuse.launcher.fuse import FuseOSError
-from studip_fuse.studipfs.api.aiointerface import Download, Pipeline
-from studip_fuse.studipfs.api.session import StudIPSession
+from studip_fuse.studipfs.api.aiointerface import Pipeline, StudIPSession
 from studip_fuse.studipfs.path.encoding import Charset, EscapeMode, escape_file_name
 
 log = logging.getLogger(__name__)
