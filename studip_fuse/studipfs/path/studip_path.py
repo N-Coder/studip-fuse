@@ -36,13 +36,13 @@ File = DataField.File
 
 
 class Abbrev:
-    SEMESTER_RE = re.compile(r'^(SS|WS) (\d{2})(.(\d{2}))?')
+    SEMESTER_RE = re.compile(r'^(So?Se?|Wi?Se?) (\d{2})(.(\d{2}))?')
     WORD_SEPARATOR_RE = re.compile(r'[-. _/()]+')
     NUMBER_RE = re.compile(r'^([0-9]+)|([IVXLCDM]+)$')
 
     @classmethod
     def semester_lexical_short(cls, title):
-        return cls.SEMESTER_RE.sub(r'20\2\1', title)
+        return re.sub("[a-z]", "", cls.SEMESTER_RE.sub(r'20\2\1', title))
 
     @classmethod
     def semester_lexical(cls, title):
