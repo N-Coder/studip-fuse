@@ -84,7 +84,7 @@ if __name__ == "__main__":
             "yarl",
 
             # Compatibility
-            "typing",
+            "typing_extensions",  # for AsyncContextManager/AsyncGenerator pre 3.6
             "async-generator",
             "async-exit-stack",
 
