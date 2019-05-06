@@ -84,10 +84,10 @@ if __name__ == "__main__":
             "yarl",
 
             # Compatibility
-            "typing_extensions",  # for AsyncContextManager/AsyncGenerator pre 3.6
-            "async-generator",
-            "async-exit-stack",
-
+            "typing_extensions",  # for AsyncGenerator/AsyncContextManager pre 3.6
+            "async-generator",  # for @async_generator pre 3.6 and @asynccontextmanager pre 3.7
+            "async-exit-stack",  # for AsyncExitStack pre 3.7
+            "pep487",  # for __init_subclass__ pre 3.6
         ],
         entry_points={
             "console_scripts": [
