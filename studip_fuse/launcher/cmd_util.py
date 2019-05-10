@@ -10,8 +10,8 @@ from studip_fuse import __version__ as prog_version
 log = logging.getLogger(__name__)
 
 
-def parse_args(dirs, argv=None):
-    opts_parser = argparse.ArgumentParser(add_help=False)
+def parse_args(dirs, argv=None, prog=None):
+    opts_parser = argparse.ArgumentParser(add_help=False, prog=prog)
     opts_parser.add_argument("-o", help="FUSE-like options", nargs="+", action=StoreNameValuePair(opts_parser))
     opts_parser.add_argument("-d", "--debug", help="turn on all debugging options", action="store_true")
     opts_parser.add_argument("-v", "--debug-logging", help="turn on debug logging", action="store_true")
@@ -57,6 +57,7 @@ def parse_args(dirs, argv=None):
     fuse_opts.add_argument("--debug-fuse", help="enable FUSE debug mode (includes --foreground)", action="store_true")
 
     parser = argparse.ArgumentParser(
+        prog=prog,
         description="studip-fuse is a FUSE (file-system in user-space) driver that provides files from lectures in "
                     "the course management tool Stud.IP on your computer.",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
