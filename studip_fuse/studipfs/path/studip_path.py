@@ -174,8 +174,7 @@ class StudIPPath(FormatTokenGeneratorVirtualPath):
         import json
         from pyrsistent import thaw
 
-        xattrs = {}
-        xattrs["known-tokens"] = json.dumps(self.known_tokens)
+        xattrs = {"known-tokens": json.dumps(self.known_tokens)}
 
         if self.is_folder:
             # list_contents is not cached, so we don't know here whether that information is available

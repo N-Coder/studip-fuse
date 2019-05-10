@@ -58,6 +58,7 @@ class HTTPClient(AsyncContextManager, ABC):
 
     @abstractmethod
     async def shib_auth(self, start_url, username, password):
+        # FIXME shibboleth session expiration
         # url is the starting point of the Shibboleth flow, e.g. self._studip_url("/studip/index.php?again=yes&sso=shib")
         pass
 
