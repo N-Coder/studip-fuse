@@ -1,13 +1,25 @@
 from abc import ABC, abstractmethod
 from datetime import datetime
 from queue import Queue
-from typing import Any, AsyncContextManager, AsyncGenerator, Callable, Coroutine, Dict, Generic, NamedTuple, Optional, TypeVar, Union
+from typing import Any, Callable, Coroutine, Dict, Generic, NamedTuple, Optional, TypeVar, Union
 
 import attr
 from pyrsistent import pmap as FrozenDict
+from typing_extensions import AsyncContextManager, AsyncIterator
 from yarl import URL
 
-__all__ = ["Pipeline", "HTTPResponse", "HTTPClient", "Download", "T"]
+try:
+    from typing_extensions import AsyncGenerator
+except ImportError:
+    _T_co = TypeVar("_T_co", covariant=True)
+    _T_contra = TypeVar("_T_contra", contravariant=True)
+
+
+    class AsyncGenerator(AsyncIterator[_T_co], Generic[_T_co, _T_contra]):
+        """similar to the definition in trio-typing for async-generator, but without the dependency on trio and mypy"""
+        pass
+
+__all__ = ["Pipeline", "HTTPResponse", "HTTPClient", "Download", "T", "AsyncGenerator", "AsyncContextManager"]
 T = TypeVar('T')
 
 

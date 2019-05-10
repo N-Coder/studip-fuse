@@ -3,7 +3,7 @@ import re
 import warnings
 from collections import namedtuple
 from datetime import datetime
-from typing import AsyncGenerator, List, Mapping, Tuple
+from typing import List, Mapping, Tuple
 
 import attr
 from aiohttp import ClientResponseError
@@ -13,7 +13,7 @@ from more_itertools import one
 from pyrsistent import freeze, pvector as FrozenList
 from yarl import URL
 
-from studip_fuse.studipfs.api.aiointerface import FrozenDict, HTTPClient
+from studip_fuse.studipfs.api.aiointerface import FrozenDict, HTTPClient, AsyncGenerator
 
 __all__ = ["REQUIRED_API_ENDPOINTS", "OAuth1URLs", "DEFAULT_OAUTH1_URLS", "StudIPSession"]
 REQUIRED_API_ENDPOINTS = [
