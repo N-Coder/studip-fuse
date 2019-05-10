@@ -41,6 +41,7 @@ class LoggerWriter:
 
 
 def configure_logging(dirs):
+    sys.stdout = open(sys.stdout.fileno(), "w", encoding=sys.stdout.encoding, errors="backslashreplace")
     logging_path = os.path.join(dirs.user_config_dir, "studip-logging-config.yaml")
     if os.path.isfile(logging_path):
         with open(logging_path, "rb") as f:
