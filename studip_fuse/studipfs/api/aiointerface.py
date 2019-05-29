@@ -4,17 +4,38 @@ from collections import namedtuple
 from datetime import datetime
 from io import FileIO
 from queue import Queue
-from typing import Any, AsyncContextManager, AsyncGenerator, Callable, Coroutine, Dict, Generic, List, NamedTuple, Optional, Tuple, TypeVar, Union
+from typing import Any, Callable, Coroutine, Dict, Generic, List, NamedTuple, Optional, Tuple, TypeVar, Union
 
 import attr
 from aiofiles.threadpool import AsyncFileIO
 from more_itertools import one
 from pyrsistent import pmap as FrozenDict
+from typing_extensions import AsyncContextManager, AsyncIterator
 from yarl import URL
 
-__all__ = ["Pipeline", "HTTPResponse", "HTTPClient", "Download", "T", "StudIPSession"] + \
+from studip_fuse.avfs.real_path import RealPath
+
+try:
+    from typing_extensions import AsyncGenerator
+except ImportError:
+    _T_co = TypeVar("_T_co", covariant=True)
+    _T_contra = TypeVar("_T_contra", contravariant=True)
+
+
+    class AsyncGenerator(AsyncIterator[_T_co], Generic[_T_co, _T_contra]):
+        """similar to the definition in trio-typing for async-generator, but without the dependency on trio and mypy"""
+        pass
+
+__all__ = ["Pipeline", "HTTPResponse", "HTTPClient", "Download", "StudIPSession", "LoopSetupResult"] + \
+          ["T", "AsyncGenerator", "AsyncContextManager"] + \
           ["OAuth1URLs", "DEFAULT_OAUTH1_URLS"]
 T = TypeVar('T')
+
+LoopSetupResult = NamedTuple("LoopSetupResult", [
+    ("loop_stop_fn", Callable),
+    ("loop_run_fn", Callable),
+    ("root_rp", RealPath),
+])
 
 
 class Pipeline(ABC, Generic[T]):
@@ -50,6 +71,10 @@ class HTTPClient(AsyncContextManager, ABC):
         })
 
     @abstractmethod
+    async def async_result(self, func, *args, **kwargs):
+        pass
+
+    @abstractmethod
     async def get_json(self, url) -> FrozenDict:
         pass
 
@@ -68,6 +93,7 @@ class HTTPClient(AsyncContextManager, ABC):
 
     @abstractmethod
     async def shib_auth(self, start_url, username, password):
+        # FIXME shibboleth session expiration
         # url is the starting point of the Shibboleth flow, e.g. self._studip_url("/studip/index.php?again=yes&sso=shib")
         pass
 
@@ -143,7 +169,7 @@ DEFAULT_OAUTH1_URLS = OAuth1URLs(DEFAULT_OAUTH1_PREFIX + "access_token", DEFAULT
 @attr.s(hash=False, str=False, repr=False)
 class StudIPSession(ABC):
     studip_base = attr.ib(converter=append_base_url_slash)  # type: URL
-    http = attr.ib()  # type: HTTPClient
+    http = attr.ib(repr=False)  # type: HTTPClient
 
     rel_oauth1_urls = attr.ib(default=DEFAULT_OAUTH1_URLS)  # type: OAuth1URLs
 

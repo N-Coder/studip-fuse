@@ -58,12 +58,18 @@ class AuthenticatedClientRequest(ClientRequest):
 
 @attr.s()
 class AiohttpClient(BaseHTTPClient):
-    http_session = attr.ib()  # type: Union[aiohttp.ClientSession, Callable[[], aiohttp.ClientSession]]
-    exit_stack = attr.ib(init=False, default=attr.Factory(AsyncExitStack))  # type: AsyncExitStack
+    http_session = attr.ib(repr=False)  # type: Union[aiohttp.ClientSession, Callable[[], aiohttp.ClientSession]]
+    exit_stack = attr.ib(init=False, default=attr.Factory(AsyncExitStack), repr=False)  # type: AsyncExitStack
 
     @property
     def loop(self):
         return self.http_session.loop
+
+    @cached_property
+    def async_result(self):
+        from studip_fuse.launcher.aioimpl.asyncio.main_loop import async_result_wrapper
+
+        return async_result_wrapper(self.loop)
 
     async def __aenter__(self):
         if callable(self.http_session):
@@ -121,18 +127,18 @@ class AiohttpClient(BaseHTTPClient):
 
 
 class DownloadState(enum.Enum):
-    EMPTY = enum.auto()
+    EMPTY = 1
 
-    VALIDATING = enum.auto()
-    LOADING = enum.auto()
+    VALIDATING = 2
+    LOADING = 3
 
-    DONE = enum.auto()
-    FAILED = enum.auto()
+    DONE = 4
+    FAILED = 5
 
 
 @attr.s()
 class AiohttpDownload(BaseDownload):
-    http_client = attr.ib()  # type: AiohttpClient
+    http_client = attr.ib(repr=False)  # type: AiohttpClient
 
     state = attr.ib(init=False, default=DownloadState.EMPTY)  # type: DownloadState
     future = attr.ib(init=False, default=None)  # type: Future

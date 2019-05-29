@@ -41,11 +41,11 @@ class LoggerWriter:
 
 
 def configure_logging(dirs):
-    os.makedirs(dirs.user_data_dir, exist_ok=True)  # must exist for log files
+    sys.stdout = open(sys.stdout.fileno(), "w", encoding=sys.stdout.encoding, errors="backslashreplace")
     logging_path = os.path.join(dirs.user_config_dir, "studip-logging-config.yaml")
     if os.path.isfile(logging_path):
-        with open(logging_path, "rb") as f:
-            logging_config = yaml.load(f)
+        with open(logging_path, "rt") as f:
+            logging_config = yaml.safe_load(f)
     else:
         # will only work if studip_fuse.launcher has an __init__.py file
         logging_config = yaml.safe_load(pkg_resources.resource_string("studip_fuse.launcher", "logging.yaml"))

@@ -40,7 +40,7 @@ class AsyncioPipeline(Pipeline):
                     out_queue.put_nowait(self.done_obj)
                     break
                 else:
-                    await func(item, out_queue)
+                    await func(item, out_queue)  # TODO if func is idempotent / thread-safe, awaiting this could be deferred to the end
             finally:
                 in_queue.task_done()
 

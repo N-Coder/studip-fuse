@@ -6,6 +6,7 @@ from typing import Any, Callable, Dict, Iterable, List, NewType, Optional, Set, 
 
 import attr
 from cached_property import cached_property
+import pep487
 from pyrsistent import freeze
 from tabulate import tabulate
 
@@ -212,7 +213,7 @@ class FormatTokenGenerator(object):
     doc = attr.ib(default=None)  # type: str
 
 
-class FormatTokenGeneratorVirtualPath(VirtualPath):
+class FormatTokenGeneratorVirtualPath(VirtualPath, pep487.ABC):  # for __init_subclass__ pre 3.6
     def __init_subclass__(cls, **kwargs):
         setattr(cls, "format_token_generators", {ftg.key: ftg for ftg in cls.get_format_token_generators()})
 

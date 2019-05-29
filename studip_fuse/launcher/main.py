@@ -75,8 +75,11 @@ def login_oauth_args(args):
 
 def main(argv=None):
     dirs = appdirs.AppDirs(appname="Stud.IP-Fuse", appauthor=False)  # disable author/company folder on windows
+    os.makedirs(dirs.user_data_dir, exist_ok=True)  # must exist for log files
+    os.makedirs(dirs.user_config_dir, exist_ok=True)  # must exist for oauth token storage
     configure_logging(dirs)
     args, fuse_args = parse_args(dirs, argv)
+    os.makedirs(args.cache_dir, exist_ok=True)
     try:
         if not args.debug_logging:
             logging.root.setLevel(logging.INFO)
@@ -85,9 +88,6 @@ def main(argv=None):
 
         log_status("STARTING", args=args, level=logging.DEBUG)
         log.info("Starting %s" % get_environment())
-
-        # TODO on windows args.mount may not exist, on Linux it must exist
-        os.makedirs(args.cache_dir, exist_ok=True)
 
         if args.debug_fuse:
             from studip_fuse.studipfs.fuse_ops import log_ops
@@ -110,10 +110,11 @@ def main(argv=None):
                     return
             args.get_password = lambda: password  # wrap in lambda to prevent printing
 
-        log.debug("Going to mount at %s (uid=%s, gid=%s, pid=%s, python pid=%s)", args.mount,
+        log.debug("Going to mount at %s (uid=%s, gid=%s, pid=%s, python pid=%s)", os.path.abspath(args.mount),
                   *fuse_get_context(), os.getpid())
-        # This calls fork if args.foreground == False (https://bugs.python.org/issue21998)
         try:
+            # this calls fork if args.foreground == False (and breaks running asyncio loops due to https://bugs.python.org/issue21998)
+            # XXX on windows args.mount may not exist, on Linux it must exist
             FUSE(fuse_ops, args.mount, debug=fuse_args.pop("debug_fuse"), **fuse_args)
         except RuntimeError as e:
             if more_itertools.first(e.args, None) in FUSE_ERROR_CODES:

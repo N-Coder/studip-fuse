@@ -9,7 +9,7 @@ import threading
 from collections import defaultdict
 from io import FileIO
 from threading import Lock, Thread
-from typing import Callable, Dict, List, NamedTuple
+from typing import Dict, List
 
 import attr
 from attr import Factory
@@ -17,8 +17,9 @@ from attr import Factory
 from studip_fuse.avfs.path_util import path_name
 from studip_fuse.avfs.real_path import RealPath
 from studip_fuse.launcher.fuse import FuseOSError, fuse_get_context
+from studip_fuse.studipfs.api.aiointerface import LoopSetupResult
 
-__all__ = ["LoopSetupResult", "FUSEView", "log_status", "status_queue"]
+__all__ = ["FUSEView", "log_status", "status_queue"]
 ENOATTR = getattr(errno, "ENOATTR", getattr(errno, "ENODATA"))
 
 log = logging.getLogger(__name__)
@@ -51,13 +52,6 @@ def join_thread(loop_thread):
 
     if loop_thread.is_alive():
         log.warning("Shutting down main thread and thus killing hung event loop daemon thread")
-
-
-LoopSetupResult = NamedTuple("LoopSetupResult", [
-    ("loop_stop_fn", Callable),
-    ("loop_run_fn", Callable),
-    ("root_rp", RealPath),
-])
 
 
 def syncify(asyncfun):
@@ -119,7 +113,8 @@ class FUSEView(object):
         self.loop_thread.start()
 
         log.debug("Event loop thread started, waiting for initialization to complete")
-        self.loop_stop_fn, self.loop_run_fn, self.root_rp = self.loop_future.result()
+        result = self.loop_future.result()  # type: LoopSetupResult
+        self.loop_stop_fn, self.loop_run_fn, self.root_rp = result
 
         log_status("READY", args=self.log_args)
         log.info("Mounting complete")

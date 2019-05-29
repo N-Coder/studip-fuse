@@ -2,7 +2,7 @@ import logging
 import re
 import warnings
 from datetime import datetime
-from typing import AsyncGenerator, List, Mapping, Tuple
+from typing import List, Mapping, Tuple
 
 import attr
 from aiohttp import ClientResponseError
@@ -11,7 +11,7 @@ from async_generator import async_generator, yield_
 from pyrsistent import freeze, pvector as FrozenList
 from yarl import URL
 
-from studip_fuse.studipfs.api.aiointerface import FrozenDict, StudIPSession
+from studip_fuse.studipfs.api.aiointerface import AsyncGenerator, FrozenDict, StudIPSession
 
 __all__ = ["REQUIRED_API_ENDPOINTS", "StudIPAPISession"]
 REQUIRED_API_ENDPOINTS = [

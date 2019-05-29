@@ -11,8 +11,7 @@ import aiohttp
 from async_exit_stack import AsyncExitStack
 
 from studip_fuse.launcher.cmd_util import get_environment
-from studip_fuse.studipfs.api.aiointerface import HTTPClient
-from studip_fuse.studipfs.fuse_ops import LoopSetupResult
+from studip_fuse.studipfs.api.aiointerface import HTTPClient, LoopSetupResult
 
 log = logging.getLogger(__name__)
 
