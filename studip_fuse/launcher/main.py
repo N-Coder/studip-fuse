@@ -110,8 +110,8 @@ def main(argv=None):
                     return
             args.get_password = lambda: password  # wrap in lambda to prevent printing
 
-        log.debug("Going to mount at %s (uid=%s, gid=%s, pid=%s, python pid=%s)", os.path.abspath(args.mount),
-                  *fuse_get_context(), os.getpid())
+        log.info("Going to mount at %s (uid=%s, gid=%s, pid=%s, python pid=%s)", os.path.abspath(args.mount),
+                 *fuse_get_context(), os.getpid())
         try:
             # this calls fork if args.foreground == False (and breaks running asyncio loops due to https://bugs.python.org/issue21998)
             # XXX on windows args.mount may not exist, on Linux it must exist
