@@ -147,7 +147,7 @@ def get_version(details=True, path=False):
 def get_environment():
     import platform
 
-    from studip_fuse.launcher.fuse import get_fuse_libfile, get_fuse_version
+    from refuse.high import get_fuse_libfile, get_fuse_version
 
     return "%s with FUSE %s (%s) running via %s %s on %s" \
            % (get_version(), get_fuse_version(), get_fuse_libfile(),

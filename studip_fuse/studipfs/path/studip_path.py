@@ -11,10 +11,10 @@ from typing import Optional, Tuple, Type
 import attr
 from async_generator import async_generator, yield_
 from cached_property import cached_property
+from refuse.high import FuseOSError
 
 from studip_fuse.avfs.path_util import join_path, path_name
 from studip_fuse.avfs.virtual_path import FormatTokenGeneratorVirtualPath, VirtualPath
-from studip_fuse.launcher.fuse import FuseOSError
 from studip_fuse.studipfs.api.aiointerface import Download, Pipeline
 from studip_fuse.studipfs.api.session import StudIPSession
 from studip_fuse.studipfs.path.encoding import Charset, EscapeMode, escape_file_name

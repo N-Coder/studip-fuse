@@ -4,10 +4,10 @@ import os
 
 import appdirs
 import more_itertools
+from refuse.high import FUSE, fuse_get_context
 
 import studip_fuse.launcher.aioimpl.asyncio as aioimpl_asyncio
 from studip_fuse.launcher.cmd_util import get_environment, parse_args
-from studip_fuse.launcher.fuse import FUSE, fuse_get_context
 from studip_fuse.launcher.log_utils import configure_logging
 from studip_fuse.studipfs.fuse_ops import FUSEView, log_status
 

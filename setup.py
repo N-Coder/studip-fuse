@@ -104,7 +104,7 @@ if __name__ == "__main__":
             'studip_fuse': ['launcher/logging.yaml'],
         },
         install_requires=[
-            # "fusepy", # now included here
+            "refuse==0.0.3",
 
             # Launcher Requirements
             "appdirs",
