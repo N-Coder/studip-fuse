@@ -6,7 +6,10 @@ from studip_fuse.avfs.real_path import RealPath
 
 cache = alru_cache(cache_exceptions=False)
 
-__all__ = ["CachingRealPath"]
+__all__ = [
+    "RealPathWithSeperateCache",
+    # "CachingRealPath"
+]
 
 
 def peek_cache(cached_func, *fn_args, **fn_kwargs):
@@ -17,35 +20,40 @@ def peek_cache(cached_func, *fn_args, **fn_kwargs):
     return cached_func._cache.get(key)
 
 
-class CachingRealPath(RealPath.with_middleware(cache, cache), RealPath):
-    @classmethod
-    def cache_clear(cls):
-        cls.resolve.cache_clear()
-        cls.list_contents.cache_clear()
+def RealPathWithSeperateCache():
+    class CachingRealPath(RealPath.with_middleware(cache, cache), RealPath):
+        @classmethod
+        def caches(cls):
+            return [cls.resolve, cls.list_contents]
 
-    async def getxattr(self):
-        xattrs = await super(CachingRealPath, self).getxattr()
-        if self.is_folder:
-            fut = peek_cache(self.list_contents)
-            if fut is not None:
-                if fut.done():
-                    try:
-                        exc = fut.exception()
-                    except CancelledError as e:
-                        exc = e
-                    if exc:
-                        xattrs["contents-status"] = "failed"
-                        xattrs["contents-exception"] = exc
+        async def getxattr(self):
+            xattrs = await super(CachingRealPath, self).getxattr()
+            if self.is_folder:
+                fut = peek_cache(self.list_contents)
+                if fut is not None:
+                    if fut.done():
+                        try:
+                            exc = fut.exception()
+                        except CancelledError as e:
+                            exc = e
+                        if exc:
+                            xattrs["contents-status"] = "failed"
+                            xattrs["contents-exception"] = exc
+                        else:
+                            xattrs["contents-status"] = "available"
+                            xattrs["contents-exception"] = ""
                     else:
-                        xattrs["contents-status"] = "available"
-                        xattrs["contents-exception"] = ""
+                        xattrs["contents-status"] = "pending"
+                        xattrs["contents-exception"] = "InvalidStateError: operation is not complete yet"
                 else:
-                    xattrs["contents-status"] = "pending"
-                    xattrs["contents-exception"] = "InvalidStateError: operation is not complete yet"
-            else:
-                xattrs["contents-status"] = "unknown"
-                xattrs["contents-exception"] = "InvalidStateError: operation was not started yet"
-        if isinstance(xattrs.get("contents-exception", None), BaseException):
-            exc = xattrs["contents-exception"]
-            xattrs["contents-exception"] = "%s: %s" % (type(exc).__name__, exc)
-        return xattrs
+                    xattrs["contents-status"] = "unknown"
+                    xattrs["contents-exception"] = "InvalidStateError: operation was not started yet"
+            if isinstance(xattrs.get("contents-exception", None), BaseException):
+                exc = xattrs["contents-exception"]
+                xattrs["contents-exception"] = "%s: %s" % (type(exc).__name__, exc)
+            return xattrs
+
+    return CachingRealPath
+
+# CachingRealPath with singular global caches
+# CachingRealPath = RealPathWithSeperateCache()

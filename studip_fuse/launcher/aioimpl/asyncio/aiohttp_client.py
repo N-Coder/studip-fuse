@@ -61,10 +61,15 @@ class AiohttpClient(BaseHTTPClient):
     def loop(self):
         return self.http_session.loop
 
+    def caches(self):
+        assert hasattr(self.get_json, "cache_clear")  # ensure that __aenter__ was called
+        return [self.get_json]
+
     async def __aenter__(self):
         if callable(self.http_session):
             self.http_session = self.http_session()
         self.http_session = await self.exit_stack.enter_async_context(self.http_session)
+        # create cache here to make it local to this object and not global for all Client instances
         self.get_json = alru_cache(self.get_json, loop=self.loop, cache_exceptions=False)
         return self
 

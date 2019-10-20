@@ -6,6 +6,7 @@ import warnings
 from asyncio import AbstractEventLoop
 from concurrent.futures import CancelledError
 from contextlib import ExitStack, contextmanager
+from typing import List
 
 import aiohttp
 from async_exit_stack import AsyncExitStack
@@ -28,7 +29,7 @@ def setup_asyncio_loop(args, session_context_manager=None):
             check_cancelled(future)
             loop = stack.enter_context(loop_context(args))  # type: AbstractEventLoop
             check_cancelled(future)
-            root_rp = stack.enter_context(session_context_manager(args, loop, future))
+            root_rp, caches = stack.enter_context(session_context_manager(args, loop, future))
             check_cancelled(future)
 
             log.info("Loop and session ready, sending result back to main thread")
@@ -41,14 +42,9 @@ def setup_asyncio_loop(args, session_context_manager=None):
                                   (corofn, loop))
                 return asyncio.run_coroutine_threadsafe(corofn(*args, **kwargs), loop).result()
 
-            if args.cache_expiry > 0:
-                try:
-                    root_rp.cache_clear
-                except AttributeError:
-                    log.warning("Not installing cache clear for %s %s", type(fuse_ops.root_rp), fuse_ops.root_rp)
-                else:
-                    log.debug("Installing idle time cache expiry handler")
-                    stack.enter_context(install_idle_cache_expiry(args, loop, fuse_ops, args.cache_expiry))
+            if args.cache_expiry > 0 and caches:
+                log.debug("Installing idle time cache expiry handler")
+                stack.enter_context(install_idle_cache_expiry(args, loop, fuse_ops, args.cache_expiry, caches))
 
             future.set_result(LoopSetupResult(
                 loop_stop_fn=lambda: loop.call_soon_threadsafe(loop.stop),
@@ -114,7 +110,8 @@ def session_context(args, loop, future: concurrent.futures.Future, *, ioimpl=Non
     if not vpathimpl:
         from studip_fuse.studipfs.path.studip_path import StudIPPath as vpathimpl
     if not rpathimpl:
-        from studip_fuse.launcher.aioimpl.asyncio.alru_realpath import CachingRealPath as rpathimpl
+        from studip_fuse.launcher.aioimpl.asyncio.alru_realpath import RealPathWithSeperateCache
+        rpathimpl = RealPathWithSeperateCache()
 
     stack = AsyncExitStack()
 
@@ -144,7 +141,15 @@ def session_context(args, loop, future: concurrent.futures.Future, *, ioimpl=Non
         root_vp = vpathimpl(parent=None, path_segments=[], known_data={}, next_path_segments=args.format.split("/"),
                             session=session, pipeline_type=ioimpl.Pipeline)
         root_rp = rpathimpl(parent=None, generating_vps={root_vp})
-        return root_rp
+
+        caches = []
+        for cachable in [http_client, session, root_vp, root_rp]:
+            try:
+                caches.extend(cachable.caches())
+            except AttributeError:
+                pass  # ignore classes that don't expose caches
+
+        return root_rp, caches
 
     try:
         log.info("Opening StudIP session...")
@@ -163,7 +168,7 @@ def session_context(args, loop, future: concurrent.futures.Future, *, ioimpl=Non
 
 
 @contextmanager
-def install_idle_cache_expiry(log_args, loop: asyncio.AbstractEventLoop, fuse_ops: FUSEView, timeout):
+def install_idle_cache_expiry(log_args, loop: asyncio.AbstractEventLoop, fuse_ops: FUSEView, timeout, caches: List):
     cache_log = log.getChild("cache_expiry")
 
     async def check_idle_time():
@@ -173,8 +178,12 @@ def install_idle_cache_expiry(log_args, loop: asyncio.AbstractEventLoop, fuse_op
                 cache_log.debug("FS is idle for %ds, timeout is %ds", idle_time, timeout)
                 if idle_time > timeout:
                     log_status("CLEARCACHE", args=log_args, level=logging.DEBUG)
-                    cache_log.info("Clearing cache")
-                    fuse_ops.root_rp.cache_clear()
+                    cache_log.info("Clearing caches")
+                    for cache in caches:
+                        try:
+                            cache.cache_clear()
+                        except AttributeError:
+                            pass  # ignore functions that weren't decorated with alru_cache
                     idle_time = 0
                 delay = timeout - idle_time + 10
                 cache_log.debug("Next check in %ds", delay)
