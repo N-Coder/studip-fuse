@@ -6,6 +6,7 @@ import logging.handlers
 import os
 import pprint
 import threading
+import time
 from collections import defaultdict
 from threading import Lock, Thread
 from typing import Callable, Dict, List, NamedTuple
@@ -83,6 +84,8 @@ class FUSEView(object):
     open_files = attr.ib(init=False, default=Factory(dict))  # type: Dict[int, Download]
     read_locks = attr.ib(init=False, repr=False, default=Factory(lambda: ThreadSafeDefaultDict(Lock)))
 
+    last_function_call = attr.ib(init=False, default=Factory(time.time))  # type: float
+
     @staticmethod
     def saferepr(val):
         val = pprint.saferepr(val)
@@ -107,6 +110,7 @@ class FUSEView(object):
             ret = str(e)
             raise
         finally:
+            self.last_function_call = time.time()
             if log_ops.isEnabledFor(logging.DEBUG):
                 log_ops.debug('<- %s %s', op, self.saferepr(ret))
 
@@ -115,7 +119,7 @@ class FUSEView(object):
         log.debug("Mounting at %s (uid=%s, gid=%s, pid=%s, python pid=%s)", path, *fuse_get_context(), os.getpid())
 
         self.loop_future = concurrent.futures.Future()
-        self.loop_thread = Thread(target=self.loop_setup_fn, args=(self.loop_future,), name="aio event loop", daemon=True)
+        self.loop_thread = Thread(target=self.loop_setup_fn, args=(self.loop_future, self), name="aio event loop", daemon=True)
         self.loop_thread.start()
 
         log.debug("Event loop thread started, waiting for initialization to complete")
@@ -225,6 +229,11 @@ class FUSEView(object):
     def release(self, path, fh):
         self.open_files.pop(fh, None)
         return os.close(fh)
+
+    def idle_time(self):
+        if len(self.open_files) > 0:
+            return -1
+        return time.time() - self.last_function_call
 
 
 class ThreadSafeDefaultDict(defaultdict):

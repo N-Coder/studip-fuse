@@ -24,6 +24,8 @@ def parse_args(dirs, argv=None, prog=None):
                              default=dirs.user_cache_dir)
     studip_opts.add_argument("--studip-url", "--studip", help="Stud.IP API URL", type=URL,
                              default="https://studip.uni-passau.de/studip/api.php/")
+    studip_opts.add_argument("--cache-expiry", "-e", type=int, default="0",
+                             help="timeout in seconds after which file metadata / hierarchy caches are cleared. 0 to disable expiry")
 
     auth_opts = opts_parser.add_argument_group("Authentication Options")
     auth_opts.add_argument("--login-method", help="method for logging in to Stud.IP session",

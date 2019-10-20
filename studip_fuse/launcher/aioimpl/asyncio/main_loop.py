@@ -13,7 +13,7 @@ from async_exit_stack import AsyncExitStack
 from studip_fuse.launcher.cmd_util import get_environment
 from studip_fuse.studipfs.api.aiointerface import HTTPClient
 from studip_fuse.studipfs.api.session import StudIPSession
-from studip_fuse.studipfs.fuse_ops import LoopSetupResult
+from studip_fuse.studipfs.fuse_ops import FUSEView, LoopSetupResult, log_status
 
 log = logging.getLogger(__name__)
 
@@ -22,7 +22,7 @@ def setup_asyncio_loop(args, session_context_manager=None):
     if not session_context_manager:
         session_context_manager = session_context
 
-    def start(future: concurrent.futures.Future):
+    def start(future: concurrent.futures.Future, fuse_ops: FUSEView):
         with ExitStack() as stack:
             future = stack.enter_context(future_context(future))
             check_cancelled(future)
@@ -37,9 +37,18 @@ def setup_asyncio_loop(args, session_context_manager=None):
                 assert not inspect.iscoroutine(corofn)
                 assert inspect.iscoroutinefunction(corofn)
                 if not loop.is_running():
-                    warnings.warn("Submitting coroutinefunction %s to paused main asyncio loop %s, this shouldn't happen",
-                                  corofn, loop)
+                    warnings.warn("Submitting coroutinefunction %s to paused main asyncio loop %s, this shouldn't happen" %
+                                  (corofn, loop))
                 return asyncio.run_coroutine_threadsafe(corofn(*args, **kwargs), loop).result()
+
+            if args.cache_expiry > 0:
+                try:
+                    root_rp.cache_clear
+                except AttributeError:
+                    log.warning("Not installing cache clear for %s %s", type(fuse_ops.root_rp), fuse_ops.root_rp)
+                else:
+                    log.debug("Installing idle time cache expiry handler")
+                    stack.enter_context(install_idle_cache_expiry(args, loop, fuse_ops, args.cache_expiry))
 
             future.set_result(LoopSetupResult(
                 loop_stop_fn=lambda: loop.call_soon_threadsafe(loop.stop),
@@ -151,3 +160,37 @@ def session_context(args, loop, future: concurrent.futures.Future, *, ioimpl=Non
 
         log.info("Initiating shut down sequence...")
         loop.run_until_complete(cleanup())
+
+
+@contextmanager
+def install_idle_cache_expiry(log_args, loop: asyncio.AbstractEventLoop, fuse_ops: FUSEView, timeout):
+    cache_log = log.getChild("cache_expiry")
+
+    async def check_idle_time():
+        try:
+            while True:
+                idle_time = fuse_ops.idle_time()
+                cache_log.debug("FS is idle for %ds, timeout is %ds", idle_time, timeout)
+                if idle_time > timeout:
+                    log_status("CLEARCACHE", args=log_args, level=logging.DEBUG)
+                    cache_log.info("Clearing cache")
+                    fuse_ops.root_rp.cache_clear()
+                    idle_time = 0
+                delay = timeout - idle_time + 10
+                cache_log.debug("Next check in %ds", delay)
+                await asyncio.sleep(delay)
+        finally:
+            cache_log.debug("Background task terminated")
+
+    task = loop.create_task(check_idle_time())
+    try:
+        yield
+    finally:
+        cache_log.debug("Cancelling background task")
+        task.cancel()
+        try:
+            loop.run_until_complete(task)
+        except asyncio.CancelledError:
+            pass
+        else:
+            cache_log.debug("Task %s terminated without raising CancelledError", task)

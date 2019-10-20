@@ -18,6 +18,11 @@ def peek_cache(cached_func, *fn_args, **fn_kwargs):
 
 
 class CachingRealPath(RealPath.with_middleware(cache, cache), RealPath):
+    @classmethod
+    def cache_clear(cls):
+        cls.resolve.cache_clear()
+        cls.list_contents.cache_clear()
+
     async def getxattr(self):
         xattrs = await super(CachingRealPath, self).getxattr()
         if self.is_folder:

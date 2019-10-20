@@ -144,6 +144,9 @@ Stud.IP Driver Options:
                         path to cache directory (default: /home/user/.cache/Stud.IP-Fuse)
   --studip-url STUDIP_URL, --studip STUDIP_URL
                         Stud.IP API URL (default: https://studip.uni-passau.de/studip/api.php/)
+  --cache-expiry CACHE_EXPIRY, -e CACHE_EXPIRY
+                        timeout in seconds after which file metadata / hierarchy caches are cleared.
+                        0 to disable expiry (default: 0)
 
 Authentication Options:
   --login-method {shib,oauth,basic}
@@ -277,7 +280,7 @@ This driver obeys the [Unix philosophy](https://en.wikipedia.org/wiki/Unix_philo
 For this reason, the following details are design-decisions and no bugs:
 - the whole mount is read-only, so no modification to the downloaded files is possible.
 - all information is cached in a static, but lazy way. This means that once you open a folder or file, its contents will be loaded once and stay the same throughout the whole lifetime of the program, even if they are changed online.
-  To load the updated information, you need to restart the driver. <!-- or open a file descriptor for the hidden file ".clear_caches" (e.g. using `cat Stud.IP/.clear_caches`). -->
+  To load the updated information, you need to restart the driver or use the `--cache-expiry` option.
   Note: If a file didn't change online, its previously downloaded version may still be reused. Directories will always be loaded anew.
 - the driver needs to have a working internet connection to load new directories or files. Making already loaded files and folder persistently available when working offline is not guaranteed.
 - when mounting in background mode, problems with the Stud.IP API (e.g. wrong password) will only be detected _after_ the program forks to background. This problem will be reported to the syslog and the program exits.
