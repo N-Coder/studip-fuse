@@ -3,7 +3,7 @@ import email
 import os
 import re
 
-from setuptools import find_packages, setup
+from setuptools import Command, Distribution, find_packages, setup
 
 
 def run_cmd(*args):
@@ -41,6 +41,49 @@ def install_info():
     }
 
 
+class InstallNautilusPlugin(Command):
+    description = "install a nautilus extension that displays file status and adds a context menu entry linking files " \
+                  "to their counterpart on the studip website"
+    user_options = []
+
+    def initialize_options(self):
+        pass
+
+    def finalize_options(self):
+        pass
+
+    def run(self):
+        print("Trying to load Nautilus Extension PyGObject bindings...")
+        from studip_fuse.ext.nautilus_plugin import install_plugin
+        install_plugin()
+
+
+class MakeWindowsShortcut(Command):
+    description = "create a link on the windows desktop that starts studip-fuse when clicked"
+    user_options = [
+        # The format is (long option, short option, description).
+        ("args=", None, "arguments passed to studip-fuse when launching"),
+    ]
+
+    def initialize_options(self):
+        self.args = ""
+
+    def finalize_options(self):
+        from studip_fuse.launcher.cmd_util import parse_args
+        import appdirs
+        import shlex
+        dirs = appdirs.AppDirs(appname="Stud.IP-Fuse", appauthor=False)
+        parse_args(dirs, shlex.split(self.args), prog="setup.py make_windows_shortcut --args=")
+
+    def run(self):
+        dist = self.distribution  # type: Distribution
+        dist.fetch_build_eggs([
+            "pywin32"
+        ])
+        from studip_fuse.ext.windows_shortcut import make_shortcut
+        make_shortcut(self.args)
+
+
 if __name__ == "__main__":
     os.chdir(os.path.dirname(os.path.realpath(__file__)))
 
@@ -61,12 +104,13 @@ if __name__ == "__main__":
             'studip_fuse': ['launcher/logging.yaml'],
         },
         install_requires=[
-            # "fusepy", # now included here
+            "refuse==0.0.3",
 
             # Launcher Requirements
             "appdirs",
             "pyyaml",
             "oauthlib",
+            "setuptools-meta",
 
             # AsyncIO Requirements
             "aiohttp",
@@ -84,18 +128,23 @@ if __name__ == "__main__":
             "yarl",
 
             # Compatibility
-            "typing",
-            "async-generator",
-            "async-exit-stack",
-
+            "typing_extensions",  # for AsyncGenerator/AsyncContextManager pre 3.6
+            "async-generator",  # for @async_generator pre 3.6 and @asynccontextmanager pre 3.7
+            "async-exit-stack",  # for AsyncExitStack pre 3.7
+            "pep487",  # for __init_subclass__ pre 3.6
         ],
         entry_points={
             "console_scripts": [
-                "studip-fuse = studip_fuse.launcher.main:main",
-                "studip-fuse-install-nautilus-plugin = studip_fuse.ext.nautilus_plugin:main",
+                "studip-fuse = studip_fuse.launcher.main:main"
             ]
         },
-        setup_requires=['setuptools-meta'],
+        cmdclass={
+            "install_nautilus_plugin": InstallNautilusPlugin,
+            "make_windows_shortcut": MakeWindowsShortcut
+        },
+        setup_requires=[
+            "setuptools-meta"
+        ],
         dependency_links=[
             "git+https://github.com/noirbizarre/setuptools-meta.git#egg=setuptools-meta"
         ],

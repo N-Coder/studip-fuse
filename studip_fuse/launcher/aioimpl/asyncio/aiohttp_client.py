@@ -112,13 +112,13 @@ class AiohttpClient(BaseHTTPClient):
 
 
 class DownloadState(enum.Enum):
-    EMPTY = enum.auto()
+    EMPTY = 1
 
-    VALIDATING = enum.auto()
-    LOADING = enum.auto()
+    VALIDATING = 2
+    LOADING = 3
 
-    DONE = enum.auto()
-    FAILED = enum.auto()
+    DONE = 4
+    FAILED = 5
 
 
 @attr.s()

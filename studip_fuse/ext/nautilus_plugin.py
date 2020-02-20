@@ -1,17 +1,23 @@
-def main():
+import os
+
+try:
+    import gi
+
+    gi.require_version('Nautilus', '3.0')
+    from gi.repository import Nautilus, GObject, Gio, Gtk, Gdk
+except:
+    raise ImportError("Could not import Nautilus 3.0, GObject, Gio or Gtk/Gdk from gi repository. "
+                      "Please ensure that python-nautilus (or nautilus-python) is installed via your system's package "
+                      "manager (not pip) and you are not in a venv without system packages.\n"
+                      "https://wiki.gnome.org/Projects/NautilusPython")
+
+# noinspection PyUnresolvedReferences
+__all__ = ["Nautilus", "GObject", "Gio", "Gtk", "Gdk", "install_plugin"]
+
+
+def install_plugin():
     import inspect
-    import os
-
     import appdirs
-
-    print("Checking requirements...")
-    try:
-        import gi
-
-        gi.require_version('Nautilus', '3.0')
-        from gi.repository import Nautilus, GObject, Gio
-    except:
-        print("Could not import Nautilus 3.0, GObject or Gio from gi repository. ")
 
     folder = os.path.join(appdirs.user_data_dir("nautilus-python"), "extensions")
     os.makedirs(folder, exist_ok=True)
@@ -20,10 +26,10 @@ def main():
     script_file = inspect.getfile(inspect.currentframe())
     dest_file = os.path.join(folder, "studip_fuse_nautilus_plugin.py")
     if os.path.isfile(script_file):
-        print("Creating symbolic link from %s to %s..." % (script_file, dest_file))
         if os.path.isfile(dest_file) or os.path.islink(dest_file):
             print("Removing previous link...")
             os.remove(dest_file)
+        print("Creating symbolic link at %s pointing to %s..." % (dest_file, script_file))
         os.symlink(src=script_file, dst=dest_file)
         print("Link created.")
     else:
@@ -37,51 +43,42 @@ def main():
     # use `NAUTILUS_PYTHON_DEBUG=misc nautilus` for debugging
 
 
-if __name__ == "__main__":
-    main()
-else:
-    import gi
+class InfoProvider(GObject.GObject, Nautilus.InfoProvider):
+    def update_file_info(self, file):
+        gfile = file.get_location()
+        xattr_info = gfile.query_info("xattr::*", Gio.FileQueryInfoFlags.NONE, None)
+        status = xattr_info.get_attribute_string("xattr::studip-fuse.contents-status")
+        emblem = {
+            "unknown": "new",
+            "pending": "synchronizing",
+            "failed": "unreadable",
+            "unavailable": "unreadable",
+            "available": "default",
+            # TODO missing states: "stale",
+        }.get(status, None)
+        # TODO mark as unreadable if offline, update emblems on change
+        if emblem:
+            file.add_emblem(emblem)
 
-    gi.require_version('Nautilus', '3.0')
-    from gi.repository import Nautilus, GObject, Gio, Gtk, Gdk
 
+class MenuProvider(GObject.GObject, Nautilus.MenuProvider):
+    def menu_activate_cb(self, menu, url):
+        Gtk.show_uri(None, url, Gdk.CURRENT_TIME)
 
-    class InfoProvider(GObject.GObject, Nautilus.InfoProvider):
-        def update_file_info(self, file):
-            gfile = file.get_location()
+    def get_file_items(self, window, files):
+        if len(files) == 1:
+            gfile = files[0].get_location()
             xattr_info = gfile.query_info("xattr::*", Gio.FileQueryInfoFlags.NONE, None)
-            status = xattr_info.get_attribute_string("xattr::studip-fuse.contents-status")
-            emblem = {
-                "unknown": "new",
-                "pending": "synchronizing",
-                "failed": "unreadable",
-                "unavailable": "unreadable",
-                "available": "default",
-                # TODO missing states: "stale",
-            }.get(status, None)
-            # TODO mark as unreadable if offline, update emblems on change
-            if emblem:
-                file.add_emblem(emblem)
+            url = xattr_info.get_attribute_string("xattr::studip-fuse.url")
+            if url:
+                item = Nautilus.MenuItem(name='StudipFuseMenuProvider::OpenWeb',
+                                         label='Open on Stud.IP',
+                                         tip='Opens your browser on the Stud.IP page providing information on this file.',
+                                         icon='')
+                item.connect('activate', self.menu_activate_cb, url)
+                return item,
 
-
-    class MenuProvider(GObject.GObject, Nautilus.MenuProvider):
-        def menu_activate_cb(self, menu, url):
-            Gtk.show_uri(None, url, Gdk.CURRENT_TIME)
-
-        def get_file_items(self, window, files):
-            if len(files) == 1:
-                gfile = files[0].get_location()
-                xattr_info = gfile.query_info("xattr::*", Gio.FileQueryInfoFlags.NONE, None)
-                url = xattr_info.get_attribute_string("xattr::studip-fuse.url")
-                if url:
-                    item = Nautilus.MenuItem(name='StudipFuseMenuProvider::OpenWeb',
-                                             label='Open on Stud.IP',
-                                             tip='Opens your browser on the Stud.IP page providing information on this file.',
-                                             icon='')
-                    item.connect('activate', self.menu_activate_cb, url)
-                    return item,
-
-            return None
+        return None
 
 # TODO add appindicator and notifications, error reporting
 # http://candidtim.github.io/appindicator/2014/09/13/ubuntu-appindicator-step-by-step.html
