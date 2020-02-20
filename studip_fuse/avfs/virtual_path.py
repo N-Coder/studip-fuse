@@ -28,9 +28,9 @@ def get_format_str_fields(format_segment) -> Set[FormatToken]:
 @attr.s(frozen=True, str=False)
 class VirtualPath(ABC):
     parent = attr.ib()  # type: Optional['VirtualPath']
-    path_segments = attr.ib(convert=freeze)  # type: Tuple[Union[str, FormatToken]]
-    known_data = attr.ib(convert=freeze)  # type: Dict[DataField, Any]
-    next_path_segments = attr.ib(convert=freeze)  # type: Tuple[Union[str, FormatToken]]
+    path_segments = attr.ib(converter=freeze)  # type: Tuple[Union[str, FormatToken]]
+    known_data = attr.ib(converter=freeze)  # type: Dict[DataField, Any]
+    next_path_segments = attr.ib(converter=freeze)  # type: Tuple[Union[str, FormatToken]]
 
     # __init__  ########################################################################################################
 
